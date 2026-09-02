@@ -1,0 +1,14 @@
+# --- ставится в .venv (создан с --system-site-packages) ---
+# numpy/scipy/pandas/matplotlib/opencv/pyserial берутся из системы (ROS 2 Jazzy),
+# здесь только то, чего в системе нет.
+
+pyserial>=3.5          # мост к Arduino (в системе уже есть, зафиксировано явно)
+scikit-learn>=1.4      # базлайны и метрики для RQ1
+lightgbm>=4.3          # градиентный бустинг по признакам кривой давления
+pyarrow>=15            # parquet для логов давления/поз
+tqdm>=4.66
+pyyaml>=6.0
+rich>=13.0             # читаемый вывод в скриптах сбора датасета
+
+# ставится отдельно и позже, когда упрёшься в потолок бустинга:
+# torch --index-url https://download.pytorch.org/whl/cpu
