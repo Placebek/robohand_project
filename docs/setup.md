@@ -67,3 +67,19 @@ ln -s /media/jake/<SSD>/robohand_data data/raw
 Робот должен быть в режиме удалённого TCP/IP управления (не в режиме DobotStudio).
 
 Проверка: `ping 192.168.1.6` → сейчас не отвечает (робот не подключён).
+
+## 6. Восстановление на чистой машине
+
+`vendor/` и `.venv/` в git не лежат (см. `.gitignore`) — после `git clone` их надо
+поднять заново:
+
+```bash
+git clone https://github.com/Placebek/robohand_project.git robohand && cd robohand
+git clone --depth 1 https://github.com/Dobot-Arm/TCP-IP-Python-V4.git vendor/dobot_tcpip_v4
+python3 -m venv --system-site-packages .venv
+.venv/bin/pip install -r requirements.txt -e vendor/dobot_tcpip_v4
+```
+
+Это же — часть заявленного вклада «открытый воспроизводимый стенд» (план §11):
+если репозиторий не разворачивается с нуля одной командой, ценность открытого
+кода для рецензента околонулевая.
