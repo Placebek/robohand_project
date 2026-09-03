@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Проверка пригодности глубины HP60C для оценки нормалей (план §12.1, риск §9).
 
-Это гейт для RQ2: если нормаль на масштабе присоски (15-20 мм) шумит сильнее
+Это гейт для RQ2: если нормаль на масштабе присоски (35 мм у ES01) шумит сильнее
 ~5°, вся ветка «выравнивание по нормали» под вопросом — и узнать это надо
 до того, как вложишься в сбор датасета.
 
@@ -31,10 +31,15 @@ from sensor_msgs.msg import CameraInfo, Image
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from suction.config import DATA_CALIB, DEPTH_INFO_TOPIC, DEPTH_TOPIC  # noqa: E402
+from suction.config import (DATA_CALIB, DEPTH_INFO_TOPIC, DEPTH_MIN_M,  # noqa: E402
+                            DEPTH_TOPIC)
 
 FRAMES_PER_MEASUREMENT = 30
-CUP_DIAMETER_MM = 18.0        # характерный размер чашки — масштаб, на котором меряем нормаль
+# Заводская чашка ES01: наружный диаметр 35 мм (замер по факту). Это масштаб,
+# на котором надо оценивать нормаль — плоскость должна быть плоской на всём
+# пятне контакта, а не в одной точке. Чашка почти вдвое больше типовой 15-20 мм,
+# и это ужесточает требование к плоскостности, а не смягчает его.
+CUP_DIAMETER_MM = 35.0
 
 
 class DepthProbe(Node):
@@ -81,10 +86,23 @@ def fit_plane(points):
     return normal, float(np.sqrt((residual ** 2).mean()))
 
 
+PATCH_VALID_FRACTION = 0.9   # пятачок должен почти целиком лежать на поверхности
+PATCH_DEPTH_BAND_MM = 60.0   # разброс глубины внутри пятачка сверх этого — значит зацепили фон
+
+
 def cup_scale_normals(K, roi, depth_mm):
-    """Нормали, посчитанные на пятачках размером с чашку — то, что реально увидит политика.
+    """Нормали на пятачках размером с чашку — то, что реально увидит политика.
 
     Разброс между такими пятачками и есть практический шум оценки нормали.
+
+    Пятачки с дырами и со ступенькой на фон отбрасываются: подгонка плоскости
+    по точкам, часть которых лежит на столе в полуметре позади, даёт нормаль
+    в десятки градусов и отравляет всю статистику. Отбрасывать надо ДО расчёта,
+    а не убирать выбросы после — иначе непонятно, что именно ты убрал.
+
+    Возвращает список (нормаль, RMS, (cx, cy)) — координаты нужны, чтобы
+    отделить центр кадра от периферии: у дешёвых RGB-D карта глубины к краям
+    систематически выгнута, и это видно только в таком разрезе.
     """
     x0, y0, w, h = roi
     patch = depth_mm[y0:y0 + h, x0:x0 + w]
@@ -95,16 +113,41 @@ def cup_scale_normals(K, roi, depth_mm):
     # радиус чашки в пикселях на текущей дистанции
     r_px = max(3, int(round(CUP_DIAMETER_MM / 2 * K[0, 0] / z_med)))
 
-    normals = []
+    out = []
     step = r_px
     for cy in range(y0 + r_px, y0 + h - r_px, step):
         for cx in range(x0 + r_px, x0 + w - r_px, step):
-            sub = (cx - r_px, cy - r_px, 2 * r_px, 2 * r_px)
-            pts = backproject(depth_mm, K, sub)
+            sub_d = depth_mm[cy - r_px:cy + r_px, cx - r_px:cx + r_px]
+            m = sub_d > 0
+            if m.mean() < PATCH_VALID_FRACTION:
+                continue
+            zz = sub_d[m]
+            if float(zz.max() - zz.min()) > PATCH_DEPTH_BAND_MM:
+                continue
+            pts = backproject(depth_mm, K, (cx - r_px, cy - r_px, 2 * r_px, 2 * r_px))
             n, rms = fit_plane(pts)
             if n is not None:
-                normals.append((n, rms))
-    return normals
+                out.append((n, rms, (cx, cy)))
+    return out
+
+
+def spread_stats(cups, K):
+    """Разброс нормалей, отдельно по центру кадра и по периферии."""
+    normals = [c[0] for c in cups]
+    mean_n = np.mean(normals, axis=0)
+    mean_n /= np.linalg.norm(mean_n)
+    sp = np.array([angle_between(n, mean_n) for n in normals])
+    cx = np.array([c[2][0] for c in cups], dtype=float)
+    cy = np.array([c[2][1] for c in cups], dtype=float)
+    # «центр» — внутри половины кадра вокруг главной точки
+    central = (np.abs(cx - K[0, 2]) < 160) & (np.abs(cy - K[1, 2]) < 120)
+    return {
+        "median_deg": float(np.median(sp)),
+        "p95_deg": float(np.percentile(sp, 95)),
+        "n_patches": len(cups),
+        "center_median_deg": float(np.median(sp[central])) if central.sum() >= 5 else None,
+        "edge_median_deg": float(np.median(sp[~central])) if (~central).sum() >= 5 else None,
+    }
 
 
 def angle_between(n1, n2):
@@ -132,11 +175,8 @@ def measure(node, roi, frames=FRAMES_PER_MEASUREMENT):
         distances.append(float(np.median(pts[:, 2])))
 
         cups = cup_scale_normals(node.K, roi, depth)
-        if len(cups) >= 2:
-            cup_ns = [c[0] for c in cups]
-            mean_n = np.mean(cup_ns, axis=0)
-            mean_n /= np.linalg.norm(mean_n)
-            cup_spreads.append(float(np.mean([angle_between(cn, mean_n) for cn in cup_ns])))
+        if len(cups) >= 5:
+            cup_spreads.append(spread_stats(cups, node.K))
         collected += 1
 
     if not plane_normals:
@@ -154,7 +194,12 @@ def measure(node, roi, frames=FRAMES_PER_MEASUREMENT):
         "planarity_rms_mm": float(np.mean(plane_rms)),
         "temporal_jitter_deg": float(np.std(temporal_jitter)),
         "temporal_jitter_max_deg": float(np.max(temporal_jitter)),
-        "cup_scale_spread_deg": float(np.mean(cup_spreads)) if cup_spreads else None,
+        "cup_scale": {
+            k: (float(np.median([c[k] for c in cup_spreads if c[k] is not None]))
+                if any(c[k] is not None for c in cup_spreads) else None)
+            for k in ("median_deg", "p95_deg", "center_median_deg", "edge_median_deg")
+        } if cup_spreads else None,
+        "cup_patches": int(np.median([c["n_patches"] for c in cup_spreads])) if cup_spreads else 0,
     }
 
 
@@ -167,7 +212,22 @@ def main():
     while (node.depth_mm is None or node.K is None) and time.monotonic() < deadline:
         rclpy.spin_once(node, timeout_sec=0.2)
     if node.depth_mm is None:
-        print("Нет кадров глубины. Драйвер камеры запущен?")
+        print("Кадры глубины не приходят вообще. Драйвер камеры запущен?")
+        print("  проверь:  ros2 topic hz " + DEPTH_TOPIC)
+        return
+
+    # Отдельный случай, который легко принять за отсутствие камеры: кадры идут,
+    # но целиком нулевые. У HP60C так выглядит сцена ближе паспортных 0.2 м —
+    # дальномер просто не отдаёт значений, а не сообщает об ошибке.
+    if not (node.depth_mm > 0).any():
+        print()
+        print("Кадры приходят, но глубина ПУСТАЯ: ноль валидных пикселей.")
+        print(f"Самая частая причина — сцена ближе минимума {DEPTH_MIN_M:.2f} м.")
+        print("Отодвинь камеру на 0.30-0.45 м и запусти снова.")
+        print("Проверить дистанцию, не гадая: tools/run_camera_plan.sh")
+        print()
+        print("Если отодвинул, а глубина всё равно пустая — смотри на сцену:")
+        print("зеркало, стекло и глубокий чёрный дальномер тоже не видит.")
         return
     if node.K is None:
         print(f"Нет camera_info на {DEPTH_INFO_TOPIC}. Проверь имя топика:\n"
@@ -221,10 +281,19 @@ def main():
                       f"(шум глубины на масштабе ROI)")
                 print(f"  дрожание нормали во вр.:  {r['temporal_jitter_deg']:.2f}° "
                       f"(max {r['temporal_jitter_max_deg']:.2f}°)")
-                if r["cup_scale_spread_deg"] is not None:
-                    v = r["cup_scale_spread_deg"]
+                cs = r["cup_scale"]
+                if cs is not None:
+                    v = cs["median_deg"]
                     verdict = "ОК для RQ2" if v < 5 else "ПЛОХО — RQ2 под вопросом"
-                    print(f"  разброс на масштабе чашки: {v:.2f}°  <-- {verdict}")
+                    print(f"  разброс нормали на чашке: {v:.2f}° "
+                          f"(p95 {cs['p95_deg']:.2f}°, пятачков {r['cup_patches']})"
+                          f"  <-- {verdict}")
+                    c, e = cs["center_median_deg"], cs["edge_median_deg"]
+                    if c is not None and e is not None:
+                        print(f"      центр кадра {c:.2f}°   периферия {e:.2f}°", end="")
+                        print("   <-- глубина выгнута к краям" if e > 2 * c else "")
+                else:
+                    print("  пятачков не набралось: ROI мелкий или в дырах")
 
                 if len(results) >= 2:
                     prev = results[-2]

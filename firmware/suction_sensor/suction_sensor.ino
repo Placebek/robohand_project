@@ -1,28 +1,36 @@
 /*
- * Вакуумный мост: датчик CFSensor XGZP6847D (I2C) + насос + клапан 3/2.
+ * Сенсорная приставка к заводской присоске DOBOT ES01.
  *
- * Зачем так: момент включения насоса метится ЧАСАМИ МК, в том же временном
- * базисе, что и отсчёты давления. Если ставить t=0 по времени хоста, USB-джиттер
- * (единицы миллисекунд) размажет фронт нарастания разрежения — а именно его
- * форма и есть главный признак для RQ1. Хост потом сшивает эту шкалу со своей
- * по строкам E (см. suction/vacuum/).
+ * Конфигурация: ES01 включает сам робот по линии DO 24 В. Arduino ничем не
+ * управляет — он ТОЛЬКО меряет. Две задачи:
+ *   1) поток давления с датчика XGZP6847D (I2C) на максимальной частоте;
+ *   2) захват электрического фронта команды DO робота на прерывании.
  *
- * Плата: Arduino Nano / ESP32. Для ESP32 поправь PIN_* и SDA/SCL.
+ * Пункт 2 — не удобство, а необходимость. Метка «присоска включена», пришедшая
+ * из контроллера робота по TCP, имеет джиттер в единицы миллисекунд — тот же
+ * масштаб, что и измеряемый фронт нарастания разрежения. Захват фронта самим
+ * Arduino ставит t=0 в ту же шкалу, где лежат отсчёты давления, и делает
+ * синхронизацию аппаратной. Вопрос ревьюера «а точно ли ваш t=0 там, где вы
+ * говорите» после этого закрывается одной фразой.
  *
- * Протокол датчика (datasheet XGZP6847D V2.5, стр. 6-8):
+ * Развязка: линия DO 24 В -> резистор 2.2к -> PC817 -> D2 (INT0), вход с
+ * подтяжкой. Активное состояние DO открывает оптопару и тянет D2 к земле,
+ * поэтому логика инвертирована (LOW = присоска включена).
+ * ПЕРЕД СБОРКОЙ проверь мультиметром, DO робота выдаёт 24 В или замыкает на
+ * землю (sourcing/sinking) — от этого зависит включение светодиода оптопары.
+ *
+ * Датчик (datasheet XGZP6847D V2.5, стр. 6-8):
  *   адрес 0x6D; запись 0x0A в рег. 0x30 -> совмещённое преобразование;
  *   ждать сброса бита Sco (0x08) в рег. 0x30; читать 0x06..0x08 -> 24 бита,
- *   старший бит - знак: если ADC >= 2^23, то ADC -= 2^24;
- *   давление[Па] = ADC / K, для диапазона -100..100 кПа K = 64.
+ *   старший бит знаковый: если ADC >= 2^23, то ADC -= 2^24;
+ *   давление[Па] = ADC / K, для диапазона |P| <= 130 кПа K = 64.
  *
  * Протокол по USB (строки, \n):
- *   ->  P1 / P0     насос вкл/выкл
- *       V1 / V0     клапан вкл/выкл (вкл = вакуум на чашку, выкл = сброс в атмосферу)
- *       T           тарировка: текущее давление принять за 0 (делать при открытой чашке)
- *       ?           информация
- *   <-  D <seq> <micros> <adc_raw> <pump> <valve>    отсчёт давления
- *       E <micros> <event>                            событие (pump_on, valve_off, ...)
- *       # <text>                                      комментарий/ошибка
+ *   ->  T   тарировка: текущее давление принять за ноль (при открытой чашке)
+ *       ?   информация
+ *   <-  D <seq> <micros> <adc_raw> <do_state>   отсчёт давления
+ *       E <micros> suction_on|suction_off       фронт DO робота
+ *       # <text>                                комментарий/ошибка
  */
 
 #include <Wire.h>
@@ -33,19 +41,26 @@
 #define CMD_COMBINED  0x0A     // однократное совмещённое преобразование
 #define SCO_BIT       0x08
 
-// K для диапазона 65 < |P| <= 130 кПа (наш -100..0 кПа gauge). Датчик на другой
-// диапазон -> поменяй по таблице K в даташите, иначе шкала уедет в разы.
+// K для диапазона 65 < |P| <= 130 кПа (наш -100..0 кПа gauge). Датчик другого
+// диапазона -> поменяй по таблице K в даташите, иначе шкала уедет в разы.
 #define K_FACTOR      64.0f
 
-const uint8_t PIN_PUMP  = 5;   // -> затвор IRLZ44N (насос)
-const uint8_t PIN_VALVE = 6;   // -> затвор IRLZ44N (клапан 3/2)
-
+const uint8_t PIN_DO_SENSE = 2;   // INT0, вход от PC817. LOW = ES01 включён
 const uint32_t BAUD = 500000;
 
 uint32_t seq = 0;
 int32_t tare_adc = 0;
-bool pump_on = false;
-bool valve_on = false;
+
+// Заполняется в прерывании, читается в loop -> volatile обязателен.
+volatile uint32_t edge_us = 0;
+volatile uint8_t edge_state = 0;
+volatile bool edge_pending = false;
+
+void onDoEdge() {
+  edge_us = micros();
+  edge_state = (digitalRead(PIN_DO_SENSE) == LOW) ? 1 : 0;   // инверсия оптопары
+  edge_pending = true;
+}
 
 // --- I2C -----------------------------------------------------------------
 bool writeReg(uint8_t reg, uint8_t val) {
@@ -85,25 +100,9 @@ int32_t readPressureAdc() {
   return adc;
 }
 
-// --- Управление ----------------------------------------------------------
-void setPump(bool on) {
-  pump_on = on;
-  digitalWrite(PIN_PUMP, on ? HIGH : LOW);
-  Serial.print("E "); Serial.print(micros());
-  Serial.println(on ? " pump_on" : " pump_off");
-}
-
-void setValve(bool on) {
-  valve_on = on;
-  digitalWrite(PIN_VALVE, on ? HIGH : LOW);
-  Serial.print("E "); Serial.print(micros());
-  Serial.println(on ? " valve_on" : " valve_off");
-}
-
+// --- Команды -------------------------------------------------------------
 void handleCommand(const char *cmd) {
   switch (cmd[0]) {
-    case 'P': setPump(cmd[1] == '1'); break;
-    case 'V': setValve(cmd[1] == '1'); break;
     case 'T': {
       int32_t adc = readPressureAdc();
       if (adc != INT32_MIN) {
@@ -117,8 +116,7 @@ void handleCommand(const char *cmd) {
     case '?':
       Serial.print("# xgzp6847d K="); Serial.print(K_FACTOR);
       Serial.print(" tare_adc="); Serial.print(tare_adc);
-      Serial.print(" pump="); Serial.print(pump_on);
-      Serial.print(" valve="); Serial.println(valve_on);
+      Serial.print(" do="); Serial.println(digitalRead(PIN_DO_SENSE) == LOW);
       break;
     default:
       Serial.println("# unknown command");
@@ -126,14 +124,13 @@ void handleCommand(const char *cmd) {
 }
 
 void setup() {
-  pinMode(PIN_PUMP, OUTPUT);
-  pinMode(PIN_VALVE, OUTPUT);
-  digitalWrite(PIN_PUMP, LOW);
-  digitalWrite(PIN_VALVE, LOW);
+  pinMode(PIN_DO_SENSE, INPUT_PULLUP);
 
   Serial.begin(BAUD);
   Wire.begin();
   Wire.setClock(400000);       // fast mode: на 100 кГц транзакции съедают бюджет цикла
+
+  attachInterrupt(digitalPinToInterrupt(PIN_DO_SENSE), onDoEdge, CHANGE);
 
   delay(50);
   int32_t adc = readPressureAdc();
@@ -146,6 +143,17 @@ void setup() {
 }
 
 void loop() {
+  // Фронт DO печатаем вне очереди: он и есть t=0 для всего анализа RQ1.
+  if (edge_pending) {
+    noInterrupts();
+    uint32_t us = edge_us;
+    uint8_t st = edge_state;
+    edge_pending = false;
+    interrupts();
+    Serial.print("E "); Serial.print(us);
+    Serial.println(st ? " suction_on" : " suction_off");
+  }
+
   static char buf[16];
   static uint8_t len = 0;
   while (Serial.available()) {
@@ -170,6 +178,5 @@ void loop() {
   Serial.print("D "); Serial.print(seq++);
   Serial.print(' '); Serial.print(t);
   Serial.print(' '); Serial.print(adc);
-  Serial.print(' '); Serial.print(pump_on ? 1 : 0);
-  Serial.print(' '); Serial.println(valve_on ? 1 : 0);
+  Serial.print(' '); Serial.println(digitalRead(PIN_DO_SENSE) == LOW ? 1 : 0);
 }

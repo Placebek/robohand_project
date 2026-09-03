@@ -1,0 +1,823 @@
+<title>Проприоцепция вакуумного захвата</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&display=swap">
+
+<style>
+  :root {
+    --ground:  #EEF2F3;
+    --surface: #FFFFFF;
+    --sunk:    #E4EAEC;
+    --ink:     #101A1D;
+    --muted:   #5A6C71;
+    --line:    #D3DCDE;
+    --accent:  #0E6E78;
+    --accent-soft: #0E6E7818;
+    --warn:    #9C5311;
+    --warn-soft:   #9C531114;
+    --stop:    #7A2E2E;
+
+    --f-display: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+    --f-body: "Source Serif 4", Georgia, "Times New Roman", serif;
+    --f-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+    --measure: 34rem;
+    --wide: 62rem;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground:  #0C1214;
+      --surface: #131C1F;
+      --sunk:    #0F1719;
+      --ink:     #E4EBEC;
+      --muted:   #93A5A9;
+      --line:    #253236;
+      --accent:  #45B9C5;
+      --accent-soft: #45B9C51F;
+      --warn:    #D08A3C;
+      --warn-soft:   #D08A3C1A;
+      --stop:    #D97A72;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --ground:  #0C1214;
+    --surface: #131C1F;
+    --sunk:    #0F1719;
+    --ink:     #E4EBEC;
+    --muted:   #93A5A9;
+    --line:    #253236;
+    --accent:  #45B9C5;
+    --accent-soft: #45B9C51F;
+    --warn:    #D08A3C;
+    --warn-soft:   #D08A3C1A;
+    --stop:    #D97A72;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--f-body);
+    font-size: 17px;
+    line-height: 1.62;
+    margin: 0;
+    padding: 0 1.25rem 6rem;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap { max-width: var(--wide); margin: 0 auto; }
+
+  /* каждый прямой потомок в измеримой колонке; .bleed вырывается на всю ширину */
+  section > * { max-width: var(--measure); }
+  section > .bleed { max-width: none; }
+
+  /* ---- шапка ---- */
+  header {
+    max-width: var(--wide);
+    margin: 0 auto;
+    padding: 4.5rem 0 2.5rem;
+    border-bottom: 1px solid var(--line);
+  }
+  .kicker {
+    font-family: var(--f-mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.13em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0 0 1.1rem;
+  }
+  h1 {
+    font-family: var(--f-display);
+    font-weight: 600;
+    font-size: clamp(2rem, 5.2vw, 3.1rem);
+    line-height: 1.08;
+    letter-spacing: -0.02em;
+    text-wrap: balance;
+    margin: 0 0 1.2rem;
+    max-width: 20ch;
+  }
+  .standfirst {
+    font-size: 1.16rem;
+    color: var(--muted);
+    max-width: 46ch;
+    margin: 0 0 2.4rem;
+  }
+  .facts {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr));
+    gap: 1px;
+    background: var(--line);
+    border: 1px solid var(--line);
+  }
+  .facts div { background: var(--surface); padding: 0.85rem 1rem; }
+  .facts dt {
+    font-family: var(--f-mono);
+    font-size: 0.66rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 0 0 0.3rem;
+  }
+  .facts dd {
+    font-family: var(--f-display);
+    font-size: 0.98rem;
+    font-weight: 500;
+    margin: 0;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* ---- секции ---- */
+  section { padding: 3.6rem 0 0; }
+  .eyebrow {
+    font-family: var(--f-mono);
+    font-size: 0.7rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 0 0 0.7rem;
+    padding-bottom: 0.7rem;
+    border-bottom: 1px solid var(--line);
+    max-width: none;
+  }
+  h2 {
+    font-family: var(--f-display);
+    font-weight: 600;
+    font-size: 1.62rem;
+    letter-spacing: -0.012em;
+    line-height: 1.2;
+    text-wrap: balance;
+    margin: 0 0 1rem;
+  }
+  h3 {
+    font-family: var(--f-display);
+    font-weight: 600;
+    font-size: 1.04rem;
+    letter-spacing: -0.005em;
+    margin: 2rem 0 0.5rem;
+  }
+  p { margin: 0 0 1.05rem; }
+  strong { font-weight: 600; }
+  em { font-style: italic; }
+  code {
+    font-family: var(--f-mono);
+    font-size: 0.87em;
+    background: var(--sunk);
+    padding: 0.08em 0.34em;
+    border-radius: 2px;
+  }
+
+  .lead { font-size: 1.06rem; }
+
+  /* ---- врезка-вердикт ---- */
+  .verdict {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--accent);
+    padding: 1.4rem 1.5rem;
+    margin: 0 0 1.6rem;
+  }
+  .verdict p:last-child { margin-bottom: 0; }
+  .verdict .big {
+    font-family: var(--f-display);
+    font-weight: 600;
+    font-size: 1.25rem;
+    letter-spacing: -0.01em;
+    margin-bottom: 0.6rem;
+  }
+
+  /* ---- определения (объект/предмет/...) ---- */
+  .defs { border-top: 1px solid var(--line); margin: 1.4rem 0 0; }
+  .defs > div {
+    display: grid;
+    grid-template-columns: 8.5rem 1fr;
+    gap: 0 1.5rem;
+    padding: 0.95rem 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .defs dt {
+    font-family: var(--f-mono);
+    font-size: 0.7rem;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--accent);
+    padding-top: 0.28em;
+  }
+  .defs dd { margin: 0; }
+  @media (max-width: 34rem) {
+    .defs > div { grid-template-columns: 1fr; gap: 0.35rem; }
+  }
+
+  /* ---- нумерованные задачи (порядок здесь несёт смысл) ---- */
+  ol.tasks { list-style: none; counter-reset: t; padding: 0; margin: 1.2rem 0; }
+  ol.tasks li {
+    counter-increment: t;
+    display: grid;
+    grid-template-columns: 2.1rem 1fr;
+    gap: 0 0.8rem;
+    padding: 0.6rem 0;
+    border-bottom: 1px dotted var(--line);
+  }
+  ol.tasks li::before {
+    content: counter(t, decimal-leading-zero);
+    font-family: var(--f-mono);
+    font-size: 0.78rem;
+    color: var(--accent);
+    padding-top: 0.35em;
+  }
+  ul.plain { padding-left: 1.15rem; margin: 1rem 0; }
+  ul.plain li { margin-bottom: 0.5rem; }
+
+  /* ---- таблицы ---- */
+  .scroll { overflow-x: auto; margin: 1.4rem 0; }
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    min-width: 34rem;
+    font-family: var(--f-display);
+    font-size: 0.9rem;
+  }
+  th, td {
+    text-align: left;
+    padding: 0.7rem 0.9rem;
+    border-bottom: 1px solid var(--line);
+    vertical-align: top;
+  }
+  thead th {
+    font-family: var(--f-mono);
+    font-size: 0.68rem;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--muted);
+    border-bottom: 1px solid var(--ink);
+    white-space: nowrap;
+  }
+  tbody tr:hover { background: var(--accent-soft); }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .cfg { font-family: var(--f-mono); font-weight: 500; white-space: nowrap; }
+
+  .chip {
+    display: inline-block;
+    font-family: var(--f-mono);
+    font-size: 0.68rem;
+    letter-spacing: 0.04em;
+    padding: 0.12em 0.5em;
+    border: 1px solid currentColor;
+    border-radius: 2px;
+  }
+  .chip.on  { color: var(--accent); }
+  .chip.off { color: var(--muted); opacity: 0.75; }
+
+  /* ---- фигуры ---- */
+  figure {
+    margin: 1.8rem 0;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    padding: 1.4rem;
+  }
+  figure svg { display: block; width: 100%; height: auto; }
+  figcaption {
+    font-family: var(--f-mono);
+    font-size: 0.73rem;
+    line-height: 1.55;
+    color: var(--muted);
+    margin-top: 1.1rem;
+    padding-top: 0.9rem;
+    border-top: 1px solid var(--line);
+    max-width: 62ch;
+  }
+  .figscroll { overflow-x: auto; }
+  .figscroll svg { min-width: 40rem; }
+
+  /* ---- стек ---- */
+  .stack { display: grid; gap: 1px; background: var(--line); border: 1px solid var(--line); margin: 1.4rem 0; }
+  .layer { background: var(--surface); padding: 1rem 1.2rem; display: grid; grid-template-columns: 5.5rem 1fr; gap: 0 1.2rem; }
+  .layer .lname {
+    font-family: var(--f-mono);
+    font-size: 0.68rem;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--accent);
+    padding-top: 0.3em;
+  }
+  .layer p { margin: 0; font-size: 0.94rem; }
+  .layer .lhead { font-family: var(--f-display); font-weight: 600; font-size: 0.98rem; margin-bottom: 0.2rem; }
+  @media (max-width: 34rem) {
+    .layer { grid-template-columns: 1fr; gap: 0.3rem; }
+  }
+
+  footer {
+    max-width: var(--wide);
+    margin: 4.5rem auto 0;
+    padding-top: 1.6rem;
+    border-top: 1px solid var(--line);
+    font-family: var(--f-mono);
+    font-size: 0.73rem;
+    color: var(--muted);
+    line-height: 1.7;
+  }
+
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+</style>
+
+<header>
+  <p class="kicker">Дипломная работа · формулировка темы</p>
+  <h1>Проприоцепция вакуумного захвата</h1>
+  <p class="standfirst">
+    Серийная присоска знает команду «включись», но не знает, присосалась ли она.
+    Работа проверяет, сколько информации об исходе захвата содержится в кривой
+    разрежения — и стоит ли замыкать её в контур управления.
+  </p>
+  <dl class="facts">
+    <div><dt>Манипулятор</dt><dd>Dobot Magician E6</dd></div>
+    <div><dt>Захват</dt><dd>DOBOT ES01</dd></div>
+    <div><dt>Разрежение</dt><dd>55 кПа</dd></div>
+    <div><dt>Расход</dt><dd>2,0 л/мин</dd></div>
+    <div><dt>Камера</dt><dd>Nuwa HP60C</dd></div>
+    <div><dt>Датчик</dt><dd>≈100 Гц</dd></div>
+  </dl>
+</header>
+
+<div class="wrap">
+
+<section>
+  <p class="eyebrow">Ответ на вопрос кафедры</p>
+  <h2>Это исследовательская работа, а не разработка</h2>
+
+  <div class="verdict bleed" style="max-width: var(--measure);">
+    <p class="big">Разработка здесь — инструмент. Результат — числа.</p>
+    <p style="margin-bottom:0">
+      Работа не заканчивается собранным стендом. Она заканчивается ответом на
+      вопрос, который сейчас открыт: <em>насколько</em> сигнал разрежения улучшает
+      захват, <em>за какое время</em> он позволяет распознать отказ и <em>на каких
+      классах поверхностей</em> выигрыш исчезает.
+    </p>
+  </div>
+
+  <p>
+    Граница простая. Разработка отвечает «мы построили систему, и она работает».
+    Исследование отвечает «мы проверили гипотезу, вот величина эффекта, вот
+    условия, при которых он пропадает». Формальные признаки второго здесь все:
+  </p>
+
+  <ul class="plain">
+    <li><strong>Фальсифицируемая гипотеза.</strong> Она может не подтвердиться — и это тоже результат, который публикуется.</li>
+    <li><strong>Контрольные группы.</strong> Четыре конфигурации от слепого open-loop до полного замкнутого цикла, между ними меняется ровно один фактор.</li>
+    <li><strong>Абляции.</strong> Отдельно измеряется вклад глубины, вклад давления, вклад обучаемого классификатора против порога.</li>
+    <li><strong>Проверка обобщения.</strong> Отложенный набор материалов, не встречавшихся при обучении.</li>
+    <li><strong>Перенос результата.</strong> Выводы относятся к классу «слабых вакуумных генераторов на настольных коботах», а не к одному экземпляру железа.</li>
+  </ul>
+
+  <p>
+    Инженерная часть — сенсорная обвязка, драйверы, синхронный логгер — обязательна,
+    но она средство измерения. Так же, как в физическом эксперименте установка не
+    является результатом.
+  </p>
+</section>
+
+<section>
+  <p class="eyebrow">Формальная рамка</p>
+  <h2>Объект, предмет, гипотеза</h2>
+
+  <dl class="defs">
+    <div>
+      <dt>Объект</dt>
+      <dd>Процесс вакуумного захвата бытовых объектов настольным коллаборативным роботом.</dd>
+    </div>
+    <div>
+      <dt>Предмет</dt>
+      <dd>Информативность проприоцептивного сигнала разрежения для оценки качества уплотнения и коррекции захвата в замкнутом цикле.</dd>
+    </div>
+    <div>
+      <dt>Проблема</dt>
+      <dd>Серийные вакуумные захваты не сообщают состояние уплотнения. Истинное и ложное присасывание визуально почти неразличимы, поэтому робот продолжает движение с пустой чашкой и не умеет исправляться. Ограничение названо авторами VacuumVLA в собственном разделе Limitations.</dd>
+    </div>
+    <div>
+      <dt>Гипотеза</dt>
+      <dd>Форма кривой разрежения в первые сотни миллисекунд после включения содержит достаточно информации, чтобы классифицировать исход раньше и точнее порогового правила, различать <em>тип</em> отказа, и — при обусловленной этим типом коррекции — дать больший прирост доли успешных захватов, чем слепой повтор.</dd>
+    </div>
+    <div>
+      <dt>Цель</dt>
+      <dd>Количественно оценить прирост качества вакуумного захвата от замыкания сигнала разрежения в контур управления и определить условия, при которых этот прирост существует.</dd>
+    </div>
+  </dl>
+
+  <h3>Задачи</h3>
+  <ol class="tasks">
+    <li>Интегрировать датчик разрежения в пневмотракт серийного захвата, обеспечив аппаратную синхронизацию отсчётов с моментом подачи команды.</li>
+    <li>Собрать размеченный датасет «давление × материал × угол подхода» с синхронной RGB-D-картинкой и позой инструмента.</li>
+    <li>Построить и сравнить классификаторы исхода присасывания по кривой давления; измерить зависимость точности от длины окна наблюдения.</li>
+    <li>Оценить нормаль к поверхности из карты глубины и проверить вклад выравнивания чашки по нормали.</li>
+    <li>Реализовать стратегии повторной попытки, обусловленные типом отказа, и сравнить со слепым повтором.</li>
+    <li>Определить границы применимости для слабого вакуумного генератора: классы поверхностей, на которых захват недостижим в принципе.</li>
+  </ol>
+</section>
+
+<section>
+  <p class="eyebrow">Сигнал</p>
+  <h2>Что именно измеряется</h2>
+
+  <p>
+    Бинарное «есть вакуум / нет вакуума» — это одно число. Кривая <code>p(t)</code>
+    на 100 Гц — это несколько независимых физических признаков, и каждый отвечает
+    за свой режим отказа.
+  </p>
+
+  <figure class="bleed">
+    <div class="figscroll">
+      <svg viewBox="0 0 920 300" role="img" aria-labelledby="curvetitle">
+        <title id="curvetitle">Ожидаемые формы кривой разрежения для трёх исходов присасывания</title>
+
+        <!-- окно решения -->
+        <rect x="60" y="34" width="200" height="232" fill="var(--accent-soft)"/>
+        <text x="70" y="50" font-family="IBM Plex Mono, monospace" font-size="11" fill="var(--accent)">окно решения T</text>
+
+        <!-- сетка -->
+        <g stroke="var(--line)" stroke-width="1">
+          <line x1="60" y1="40"  x2="860" y2="40"/>
+          <line x1="60" y1="113" x2="860" y2="113"/>
+          <line x1="60" y1="186" x2="860" y2="186"/>
+          <line x1="60" y1="259" x2="860" y2="259"/>
+        </g>
+        <!-- оси -->
+        <line x1="60" y1="34" x2="60" y2="266" stroke="var(--ink)" stroke-width="1.2"/>
+        <line x1="60" y1="266" x2="866" y2="266" stroke="var(--ink)" stroke-width="1.2"/>
+
+        <!-- подписи оси Y -->
+        <g font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--muted)" text-anchor="end">
+          <text x="52" y="44">0</text>
+          <text x="52" y="117">−20</text>
+          <text x="52" y="190">−40</text>
+          <text x="52" y="263">−60</text>
+        </g>
+        <text x="16" y="150" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--muted)" transform="rotate(-90 16 150)" text-anchor="middle">кПа</text>
+
+        <!-- подписи оси X -->
+        <g font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--muted)" text-anchor="middle">
+          <text x="60"  y="282">0</text>
+          <text x="260" y="282">150</text>
+          <text x="460" y="282">300</text>
+          <text x="660" y="282">450</text>
+          <text x="860" y="282">600</text>
+          <text x="800" y="297">мс от фронта команды</text>
+        </g>
+
+        <!-- t=0 -->
+        <line x1="60" y1="28" x2="60" y2="266" stroke="var(--accent)" stroke-width="1.5" stroke-dasharray="3 3"/>
+
+        <!-- кривые -->
+        <path fill="none" stroke="var(--accent)" stroke-width="2.4" stroke-linejoin="round" d="M 60.0,40.0 L 73.3,65.4 L 86.7,87.4 L 100.0,106.5 L 113.3,123.0 L 126.7,137.3 L 140.0,149.8 L 153.3,160.5 L 166.7,169.9 L 180.0,178.0 L 193.3,185.0 L 206.7,191.1 L 220.0,196.3 L 233.3,200.9 L 246.7,204.9 L 260.0,208.3 L 273.3,211.3 L 286.7,213.9 L 300.0,216.1 L 313.3,218.0 L 326.7,219.7 L 340.0,221.2 L 353.3,222.4 L 366.7,223.5 L 380.0,224.5 L 393.3,225.3 L 406.7,226.0 L 420.0,226.6 L 433.3,227.2 L 446.7,227.6 L 460.0,228.0 L 473.3,228.4 L 486.7,228.7 L 500.0,229.0 L 513.3,229.2 L 526.7,229.4 L 540.0,229.6 L 553.3,229.7 L 566.7,229.8 L 580.0,229.9 L 593.3,230.0 L 606.7,230.1 L 620.0,230.2 L 633.3,230.3 L 646.7,230.3 L 660.0,230.4 L 673.3,230.4 L 686.7,230.4 L 700.0,230.5 L 713.3,230.5 L 726.7,230.5 L 740.0,230.5 L 753.3,230.6 L 766.7,230.6 L 780.0,230.6 L 793.3,230.6 L 806.7,230.6 L 820.0,230.6 L 833.3,230.6 L 846.7,230.6 L 860.0,230.6"/>
+        <path fill="none" stroke="var(--warn)" stroke-width="2.4" stroke-linejoin="round" stroke-dasharray="7 4" d="M 60.0,40.0 L 73.3,44.9 L 86.7,49.5 L 100.0,53.7 L 113.3,57.7 L 126.7,61.4 L 140.0,64.9 L 153.3,68.1 L 166.7,71.1 L 180.0,73.9 L 193.3,76.5 L 206.7,78.9 L 220.0,81.2 L 233.3,83.2 L 246.7,85.2 L 260.0,86.9 L 273.3,88.6 L 286.7,90.1 L 300.0,91.5 L 313.3,92.8 L 326.7,94.0 L 340.0,95.1 L 353.3,96.1 L 366.7,97.0 L 380.0,97.8 L 393.3,98.6 L 406.7,99.2 L 420.0,99.8 L 433.3,100.4 L 446.7,100.9 L 460.0,101.3 L 473.3,101.7 L 486.7,102.0 L 500.0,102.3 L 513.3,102.5 L 526.7,102.7 L 540.0,102.9 L 553.3,103.0 L 566.7,103.1 L 580.0,103.2 L 593.3,103.2 L 606.7,103.2 L 620.0,103.1 L 633.3,103.1 L 646.7,103.0 L 660.0,102.9 L 673.3,102.8 L 686.7,102.7 L 700.0,102.5 L 713.3,102.3 L 726.7,102.1 L 740.0,101.9 L 753.3,101.7 L 766.7,101.5 L 780.0,101.2 L 793.3,101.0 L 806.7,100.7 L 820.0,100.4 L 833.3,100.1 L 846.7,99.8 L 860.0,99.5"/>
+        <path fill="none" stroke="var(--stop)" stroke-width="2.4" stroke-linejoin="round" stroke-dasharray="2 3" d="M 60.0,40.0 L 73.3,42.5 L 86.7,44.5 L 100.0,46.2 L 113.3,47.6 L 126.7,49.0 L 140.0,50.3 L 153.3,51.6 L 166.7,52.8 L 180.0,53.9 L 193.3,54.9 L 206.7,55.7 L 220.0,56.3 L 233.3,56.7 L 246.7,56.9 L 260.0,56.9 L 273.3,56.6 L 286.7,56.3 L 300.0,55.8 L 313.3,55.4 L 326.7,55.1 L 340.0,54.9 L 353.3,54.8 L 366.7,55.0 L 380.0,55.3 L 393.3,55.7 L 406.7,56.2 L 420.0,56.7 L 433.3,57.2 L 446.7,57.6 L 460.0,57.9 L 473.3,57.9 L 486.7,57.8 L 500.0,57.5 L 513.3,57.1 L 526.7,56.6 L 540.0,56.1 L 553.3,55.6 L 566.7,55.3 L 580.0,55.1 L 593.3,55.0 L 606.7,55.2 L 620.0,55.5 L 633.3,56.0 L 646.7,56.5 L 660.0,57.0 L 673.3,57.5 L 686.7,57.8 L 700.0,58.0 L 713.3,57.9 L 726.7,57.7 L 740.0,57.4 L 753.3,56.9 L 766.7,56.4 L 780.0,55.9 L 793.3,55.5 L 806.7,55.2 L 820.0,55.0 L 833.3,55.1 L 846.7,55.3 L 860.0,55.7"/>
+
+        <!-- подписи кривых -->
+        <g font-family="IBM Plex Sans, sans-serif" font-size="12.5">
+          <text x="700" y="224" fill="var(--accent)">успех — стекло, глянец</text>
+          <text x="640" y="93"  fill="var(--warn)">частичное — перекос, микроутечка</text>
+          <text x="640" y="48"  fill="var(--stop)">отказ — картон, ткань, сетка</text>
+        </g>
+      </svg>
+    </div>
+    <figcaption>
+      Ожидаемые формы, не измерения: эти кривые — предмет проверки, а не результат.
+      Признаки, которые из них извлекаются: скорость падения (насколько быстро
+      образовалось уплотнение), установившийся уровень (качество уплотнения),
+      наклон дрейфа на плато (микроутечка — объект вот-вот сорвётся), дисперсия
+      на плато (нестабильность на деформируемых материалах).
+    </figcaption>
+  </figure>
+
+  <p>
+    Ключевая деталь — начало отсчёта. Момент подачи команды приходит из
+    контроллера робота по TCP с джиттером в единицы миллисекунд, то есть того же
+    порядка, что и измеряемый фронт. Поэтому линия управления заводится ещё и на
+    прерывание микроконтроллера: <code>t = 0</code> ставится по электрическому
+    фронту, в той же шкале, где лежат отсчёты давления.
+  </p>
+</section>
+
+<section>
+  <p class="eyebrow">Контур</p>
+  <h2>Схема работы системы</h2>
+
+  <p>
+    Шесть стадий, и одна обратная связь. Всё, что справа от классификатора,
+    в существующих системах отсутствует — там цикл разомкнут.
+  </p>
+
+  <figure class="bleed">
+    <div class="figscroll">
+      <svg viewBox="0 0 920 340" role="img" aria-labelledby="looptitle">
+        <title id="looptitle">Замкнутый контур вакуумного захвата: шесть стадий и обратная связь коррекции</title>
+
+        <defs>
+          <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--muted)"/>
+          </marker>
+          <marker id="arA" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--accent)"/>
+          </marker>
+        </defs>
+
+        <g font-family="IBM Plex Sans, sans-serif">
+          <!-- ряд стадий -->
+          <g>
+            <rect x="16"  y="60" width="132" height="76" fill="var(--sunk)" stroke="var(--line)"/>
+            <text x="28" y="80" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--accent)">01</text>
+            <text x="28" y="99" font-size="13" font-weight="600" fill="var(--ink)">Восприятие</text>
+            <text x="28" y="115" font-size="11" fill="var(--muted)">RGB-D → нормаль,</text>
+            <text x="28" y="128" font-size="11" fill="var(--muted)">невязка плоскости</text>
+          </g>
+          <g>
+            <rect x="168" y="60" width="132" height="76" fill="var(--sunk)" stroke="var(--line)"/>
+            <text x="180" y="80" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--accent)">02</text>
+            <text x="180" y="99" font-size="13" font-weight="600" fill="var(--ink)">Поза</text>
+            <text x="180" y="115" font-size="11" fill="var(--muted)">точка + ориентация</text>
+            <text x="180" y="128" font-size="11" fill="var(--muted)">вдоль нормали</text>
+          </g>
+          <g>
+            <rect x="320" y="60" width="132" height="76" fill="var(--sunk)" stroke="var(--line)"/>
+            <text x="332" y="80" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--accent)">03</text>
+            <text x="332" y="99" font-size="13" font-weight="600" fill="var(--ink)">Подход</text>
+            <text x="332" y="115" font-size="11" fill="var(--muted)">E6 → позиция,</text>
+            <text x="332" y="128" font-size="11" fill="var(--muted)">DO → ES01 вкл</text>
+          </g>
+          <g>
+            <rect x="472" y="60" width="132" height="76" fill="var(--surface)" stroke="var(--accent)" stroke-width="1.6"/>
+            <text x="484" y="80" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--accent)">04</text>
+            <text x="484" y="99" font-size="13" font-weight="600" fill="var(--ink)">Измерение</text>
+            <text x="484" y="115" font-size="11" fill="var(--muted)">p(t) @ 100 Гц,</text>
+            <text x="484" y="128" font-size="11" fill="var(--muted)">t=0 по фронту</text>
+          </g>
+          <g>
+            <rect x="624" y="60" width="132" height="76" fill="var(--surface)" stroke="var(--accent)" stroke-width="1.6"/>
+            <text x="636" y="80" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--accent)">05</text>
+            <text x="636" y="99" font-size="13" font-weight="600" fill="var(--ink)">Классификация</text>
+            <text x="636" y="115" font-size="11" fill="var(--muted)">исход + тип</text>
+            <text x="636" y="128" font-size="11" fill="var(--muted)">отказа</text>
+          </g>
+          <g>
+            <rect x="776" y="60" width="128" height="76" fill="var(--surface)" stroke="var(--accent)" stroke-width="1.6"/>
+            <text x="788" y="80" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--accent)">06</text>
+            <text x="788" y="99" font-size="13" font-weight="600" fill="var(--ink)">Решение</text>
+            <text x="788" y="115" font-size="11" fill="var(--muted)">три исхода</text>
+          </g>
+
+          <!-- стрелки между стадиями -->
+          <g stroke="var(--muted)" stroke-width="1.4" marker-end="url(#ar)">
+            <line x1="150" y1="98" x2="164" y2="98"/>
+            <line x1="302" y1="98" x2="316" y2="98"/>
+            <line x1="454" y1="98" x2="468" y2="98"/>
+            <line x1="606" y1="98" x2="620" y2="98"/>
+            <line x1="758" y1="98" x2="772" y2="98"/>
+          </g>
+
+          <!-- ветви решения -->
+          <g font-size="11.5">
+            <path d="M 840 138 L 840 168 L 700 168" fill="none" stroke="var(--accent)" stroke-width="1.4" marker-end="url(#arA)"/>
+            <text x="706" y="164" fill="var(--accent)" text-anchor="start">успех → подъём, контроль дрейфа, перенос</text>
+
+            <path d="M 840 138 L 840 212 L 700 212" fill="none" stroke="var(--warn)" stroke-width="1.4" marker-end="url(#ar)"/>
+            <text x="706" y="208" fill="var(--warn)" text-anchor="start">перекос → коррекция угла, повтор</text>
+
+            <path d="M 840 138 L 840 256 L 700 256" fill="none" stroke="var(--stop)" stroke-width="1.4" marker-end="url(#ar)"/>
+            <text x="706" y="252" fill="var(--stop)" text-anchor="start">материал непригоден → отказаться</text>
+          </g>
+
+          <!-- обратная связь -->
+          <path d="M 700 212 L 234 212 L 234 140" fill="none" stroke="var(--accent)" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#arA)"/>
+          <rect x="286" y="196" width="196" height="32" fill="var(--surface)" stroke="var(--accent)"/>
+          <text x="384" y="211" font-size="11.5" font-weight="600" fill="var(--accent)" text-anchor="middle">обратная связь по давлению</text>
+          <text x="384" y="223" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="var(--muted)" text-anchor="middle">здесь цикл замыкается</text>
+
+          <!-- полоса вклада -->
+          <line x1="472" y1="300" x2="904" y2="300" stroke="var(--accent)" stroke-width="2"/>
+          <text x="472" y="320" font-size="11.5" fill="var(--accent)">вклад работы: стадии 04–06 и возврат на 02</text>
+          <line x1="16" y1="300" x2="452" y2="300" stroke="var(--line)" stroke-width="2"/>
+          <text x="16" y="320" font-size="11.5" fill="var(--muted)">известное: планирование присасывания по RGB-D</text>
+        </g>
+      </svg>
+    </div>
+    <figcaption>
+      Разомкнутая система обрывается на стадии 03: команда подана, дальше рука
+      действует вслепую. Стадии 04–06 и стрелка возврата на 02 — предмет работы.
+    </figcaption>
+  </figure>
+</section>
+
+<section>
+  <p class="eyebrow">Проверка</p>
+  <h2>Как измеряется эффект</h2>
+
+  <p>
+    Четыре конфигурации, между соседними меняется ровно один фактор. Это и
+    превращает работу из демонстрации в эксперимент: каждая строка отвечает за
+    свою часть гипотезы.
+  </p>
+
+  <div class="scroll bleed">
+    <table>
+      <thead>
+        <tr>
+          <th>Конфигурация</th>
+          <th>Нормаль из&nbsp;глубины</th>
+          <th>Сигнал давления</th>
+          <th>Повтор при отказе</th>
+          <th>Что проверяет</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="cfg">B0</td>
+          <td><span class="chip off">нет</span></td>
+          <td><span class="chip off">нет</span></td>
+          <td><span class="chip off">нет</span></td>
+          <td>Базовый уровень: вертикальный подход вслепую, аналог существующих систем</td>
+        </tr>
+        <tr>
+          <td class="cfg">B1</td>
+          <td><span class="chip on">да</span></td>
+          <td><span class="chip off">нет</span></td>
+          <td><span class="chip off">нет</span></td>
+          <td>Вклад одного лишь выравнивания по нормали</td>
+        </tr>
+        <tr>
+          <td class="cfg">B2</td>
+          <td><span class="chip on">да</span></td>
+          <td><span class="chip on">порог</span></td>
+          <td><span class="chip on">слепой</span></td>
+          <td>Достаточно ли простого порога и повтора «в лоб»</td>
+        </tr>
+        <tr>
+          <td class="cfg">Ours</td>
+          <td><span class="chip on">да</span></td>
+          <td><span class="chip on">классификатор</span></td>
+          <td><span class="chip on">по типу отказа</span></td>
+          <td>Даёт ли форма кривой больше, чем её уровень</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>
+    Сравнение B2 против Ours — самое честное и самое рискованное место работы.
+    Если разница окажется незначимой, вывод «порога достаточно, обучаемый
+    классификатор избыточен» тоже публикуется: он экономит время всем, кто пойдёт
+    следом.
+  </p>
+
+  <h3>Измеряемые величины</h3>
+  <div class="scroll bleed">
+    <table>
+      <thead>
+        <tr><th>Метрика</th><th>Определение</th><th>Отвечает на</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Seal success rate</td><td>Доля попыток с состоявшимся уплотнением, по классам материалов</td><td>Вклад нормали</td></tr>
+        <tr><td>Lift success rate</td><td>Доля попыток, где объект удержан ≥&nbsp;3&nbsp;с и перенесён</td><td>Итоговое качество</td></tr>
+        <tr><td>Failure detection F1</td><td>Качество классификатора исхода</td><td>Информативность кривой</td></tr>
+        <tr><td>Detection latency</td><td>Минимальное окно T, при котором F1&nbsp;≥&nbsp;0,9</td><td>Цена решения во времени</td></tr>
+        <tr><td>Recovery rate</td><td>Доля отказов, исправленных повторной попыткой</td><td>Ценность замыкания цикла</td></tr>
+        <tr><td>Attempts per success</td><td>Средняя цена одного успешного захвата</td><td>Практическую пользу</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section>
+  <p class="eyebrow">Реализация</p>
+  <h2>Слои системы</h2>
+
+  <p>
+    Три потока данных идут с разными частотами и по разным каналам. Единая
+    временная шкала — не деталь реализации, а условие того, что эксперимент
+    вообще состоится.
+  </p>
+
+  <div class="stack bleed">
+    <div class="layer">
+      <p class="lname">Железо</p>
+      <div>
+        <p class="lhead">E6 · ES01 · HP60C · датчик</p>
+        <p>Манипулятор, серийный электрический захват на фланце, статичная RGB-D-камера, датчик разрежения во врезке у чашки.</p>
+      </div>
+    </div>
+    <div class="layer">
+      <p class="lname">Каналы</p>
+      <div>
+        <p class="lhead">TCP · Serial · ROS 2</p>
+        <p>Рука — сокет на портах команд и состояния. Датчик — микроконтроллер по USB. Камера — единственное место, где нужен ROS.</p>
+      </div>
+    </div>
+    <div class="layer">
+      <p class="lname">Синхро</p>
+      <div>
+        <p class="lhead">Общая шкала времени</p>
+        <p>Давление ≈100 Гц, состояние руки — десятки Гц, кадры 20 Гц. Всё пишется с монотонной меткой в общий буфер; ресемплинг — только на этапе обучения, чтобы не потерять динамику фронта.</p>
+      </div>
+    </div>
+    <div class="layer">
+      <p class="lname">Геометрия</p>
+      <div>
+        <p class="lhead">Калибровка камера → база</p>
+        <p>Оценка нормали из облака точек, подгонка плоскости в окрестности размером с чашку. Без hand-eye калибровки перевод точки из пикселей в координаты руки невозможен — этап блокирующий.</p>
+      </div>
+    </div>
+    <div class="layer">
+      <p class="lname">Решение</p>
+      <div>
+        <p class="lhead">Классификатор и стратегия повтора</p>
+        <p>От порога к признакам кривой и градиентному бустингу, при упоре в потолок — к свёрточной модели на сыром ряде.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <p class="eyebrow">Границы</p>
+  <h2>Что работа заведомо не покажет</h2>
+
+  <p>
+    Раздел ограничений пишется до эксперимента, а не после. Это защита от
+    обвинения в подгонке выводов и одновременно готовый ответ на защите.
+  </p>
+
+  <div class="scroll bleed">
+    <table>
+      <thead>
+        <tr><th>Ограничение</th><th>Источник</th><th>Следствие</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="num">55 кПа, 2,0 л/мин</td>
+          <td>Паспорт ES01</td>
+          <td>Пористые материалы могут не присасываться никогда. Класс схлопнется в «всегда отказ» — это результат, но он обедняет таксономию</td>
+        </tr>
+        <tr>
+          <td class="num">≈500 г на объект</td>
+          <td>Payload 750 г минус 250 г захвата</td>
+          <td>Набор объектов ограничен лёгкими; тяжёлые режимы срыва не исследуются</td>
+        </tr>
+        <tr>
+          <td class="num">Минимум 0,2 м</td>
+          <td>Оптика HP60C</td>
+          <td>Камера не подводится ближе, что ограничивает разрешение по глубине в рабочей зоне</td>
+        </tr>
+        <tr>
+          <td class="num">Одна рука, одна камера</td>
+          <td>Доступное оборудование</td>
+          <td>Выводы переносятся на класс настольных коботов со слабым генератором, но не на промышленные вакуумные системы</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>
+    Слабый расход при этом играет в пользу работы. Мощный насос маскирует утечки
+    грубой силой: плохое уплотнение всё равно даёт приличную цифру. Слабый
+    генератор такого запаса не имеет, поэтому разница между хорошим и плохим
+    уплотнением в сигнале контрастнее. Плата — фронт нарастает медленнее, и
+    значения detection latency будут больше, чем на промышленном железе.
+  </p>
+</section>
+
+<section>
+  <p class="eyebrow">Новизна</p>
+  <h2>Что здесь честно ново</h2>
+
+  <p>
+    Завышать нельзя — на защите это первое, что проверяют. Разложение по частям:
+  </p>
+
+  <div class="scroll bleed">
+    <table>
+      <thead>
+        <tr><th>Элемент</th><th>Статус</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Датчик давления для детекции срыва</td><td>Известная инженерная практика: промышленные патенты, работы по вакуумному сбору плодов</td></tr>
+        <tr><td>Планирование точки присасывания по RGB-D</td><td>Изучено, Dex-Net 3.0 и последующие работы</td></tr>
+        <tr><td><strong>Сигнал давления как модальность наблюдения внутри политики, с прямым сравнением против vision-only</strong></td><td><strong>Ново.</strong> Закрывает пробел, названный авторами VacuumVLA в собственных ограничениях</td></tr>
+        <tr><td><strong>Открытый датасет «давление × материал × угол подхода» с синхронной RGB-D</strong></td><td><strong>Ново.</strong> Открытых наборов такого вида нет</td></tr>
+        <tr><td><strong>Характеризация границ слабого серийного генератора</strong></td><td><strong>Ново.</strong> Опубликованные работы используют мощные промышленные насосы</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>
+    Практическая значимость — в воспроизводимости. Модифицируется серийный,
+    коммерчески доступный захват; стоимость обвязки — единицы десятков долларов;
+    код, схемы и датасет открыты. Повторить может любой владелец такого же
+    манипулятора, тем же железом.
+  </p>
+</section>
+
+<footer>
+  Dobot Magician E6 · DOBOT ES01 · Nuwa HP60C · CFSensor XGZP6847D<br>
+  Документ описывает замысел и протокол проверки. Кривые на графике — ожидаемые формы, не результаты измерений.
+</footer>
+
+</div>
