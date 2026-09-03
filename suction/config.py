@@ -8,10 +8,19 @@ DATA_PROCESSED = ROOT / "data" / "processed"
 
 # --- Manipulator Dobot Magician E6 ---------------------------------------
 # Wi-Fi 192.168.1.6 | LAN1 192.168.5.1 | LAN2 192.168.100.1
-ARM_IP = "192.168.1.6"
+# Подключение по RJ45 в LAN1: ноут держит статический 192.168.5.100/24
+# (профиль NetworkManager "robohand-arm"), робот отвечает с 192.168.5.1.
+ARM_IP = "192.168.5.1"
 ARM_DASHBOARD_PORT = 29999   # команды
 ARM_FEEDBACK_PORT = 30004    # поток состояния
 ARM_PAYLOAD_KG = 0.75        # паспорт E6; сверься со своим экземпляром
+
+# Захват ES01 сидит на инструментальном выходе фланца, НЕ на IO контроллера.
+# Найдено перебором 2026-09-03 (tools/run_find_es01.sh): ToolDO1, первый же.
+# Команда: robot.io.ToolDOInstant(ES01_OUTPUT_INDEX, 1). Мгновенная, проходит
+# при обесточенных суставах — очередь движений не нужна.
+ES01_OUTPUT_KIND = "ToolDO"
+ES01_OUTPUT_INDEX = 1
 
 # --- Камера Nuwa HP60C (ROS 2, драйвер ascamera) --------------------------
 RGB_TOPIC = "/ascamera_hp60c/camera_publisher/rgb0/image"
