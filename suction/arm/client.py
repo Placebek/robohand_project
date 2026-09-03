@@ -120,7 +120,12 @@ class ArmClient:
                 self._robot = None
 
     def __enter__(self):
-        return self.connect()
+        # Идемпотентно: клиент могли уже подключить снаружи, а контроллер
+        # пускает на 29999 только одного — повторный connect() наткнулся бы
+        # на собственное же соединение с «IP:Port has been occupied».
+        if self._robot is None:
+            self.connect()
+        return self
 
     def __exit__(self, *exc):
         self.close()
@@ -234,6 +239,31 @@ class ArmClient:
 
     def stop(self):
         return self._rc.Stop()
+
+    # --- ручное ведение --------------------------------------------------
+    def drag(self, on, sensitivity=None):
+        """Режим ручного ведения: рука становится податливой.
+
+        ДЕРЖИ РУКУ, прежде чем включать — она обмякнет и просядет под своим
+        весом. Требует запитанных суставов. Чем меньше sensitivity, тем больше
+        сопротивление (1-90).
+        """
+        if not on:
+            return _check(self._rc.StopDrag(), "StopDrag")
+
+        if sensitivity is not None:
+            # E6 отвечает на DragSensitivity(0, ...) кодом -10000, хотя в SDK
+            # индекс 0 описан как «все оси». Настройка необязательная —
+            # не роняем из-за неё съёмку.
+            resp = self._rc.DragSensitivity(0, int(sensitivity))
+            if _err_id(resp) != 0:
+                print(f"  податливость выставить не вышло ({resp}) — "
+                      f"идём с заводской")
+        return _check(self._rc.StartDrag(), "StartDrag")
+
+    def drag_button_pressed(self):
+        """Нажата ли кнопка ручного ведения на фланце."""
+        return bool(self._status().drag_button_signal)
 
     # --- захват ---------------------------------------------------------
     def gripper(self, on):

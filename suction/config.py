@@ -26,6 +26,7 @@ ES01_MASS_KG = 0.25          # 250 г висит на фланце; это и е
 # --- Камера Nuwa HP60C (ROS 2, драйвер ascamera) --------------------------
 RGB_TOPIC = "/ascamera_hp60c/camera_publisher/rgb0/image"
 DEPTH_TOPIC = "/ascamera_hp60c/camera_publisher/depth0/image_raw"
+RGB_INFO_TOPIC = "/ascamera_hp60c/camera_publisher/rgb0/camera_info"
 DEPTH_INFO_TOPIC = "/ascamera_hp60c/camera_publisher/depth0/camera_info"
 DEPTH_MIN_M = 0.2            # паспортный минимум — ближе камера не видит
 
