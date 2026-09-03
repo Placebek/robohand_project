@@ -21,6 +21,7 @@ ARM_PAYLOAD_KG = 0.75        # паспорт E6; сверься со своим
 # при обесточенных суставах — очередь движений не нужна.
 ES01_OUTPUT_KIND = "ToolDO"
 ES01_OUTPUT_INDEX = 1
+ES01_MASS_KG = 0.25          # 250 г висит на фланце; это и есть load для EnableRobot
 
 # --- Камера Nuwa HP60C (ROS 2, драйвер ascamera) --------------------------
 RGB_TOPIC = "/ascamera_hp60c/camera_publisher/rgb0/image"
