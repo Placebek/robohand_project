@@ -78,6 +78,32 @@ def _check(resp, what):
     return resp
 
 
+def run_tool(main_fn):
+    """Запустить main() инструмента, показав отказ руки по-человечески.
+
+    ArmError — это не сбой программы, а состояние стенда: рука выключена, порт
+    занят, авария висит. Трассировка на пол-экрана тут только мешает читать,
+    что делать дальше.
+    """
+    try:
+        return main_fn()
+    except ArmError as e:
+        print(f"\n{e}")
+        return 1
+    except Exception as e:                      # noqa: BLE001
+        # Инструменты, написанные до ArmClient, ходят к SDK напрямую и получают
+        # его собственное исключение с сообщением по-китайски.
+        if type(e).__name__ != "ConnectionError":
+            raise
+        print(f"\nробот не отвечает: {e}")
+        print("  Питание? Кабель в LAN1? nmcli con up robohand-arm?")
+        print("  Порт 29999 занят другим скриптом?")
+        return 1
+    except KeyboardInterrupt:
+        print("\nпрервано")
+        return 130
+
+
 class ArmClient:
     """Dobot Magician E6. Позы читаются из потока состояния, не из dashboard."""
 
@@ -92,9 +118,23 @@ class ArmClient:
     # --- соединение -----------------------------------------------------
     def connect(self, feedback_timeout=5.0):
         from dobot_sdk import DobotRobot
+        from dobot_sdk.core.exceptions import ConnectionError as SdkConnError
         dash, fb = self._ports
         self._robot = DobotRobot(self.ip, dashboard_port=dash, feedback_port=fb)
-        self._robot.Connect()
+        try:
+            self._robot.Connect()
+        except SdkConnError as e:
+            # SDK бросает сообщение по-китайски и трассировку на пол-экрана.
+            # Подменяем на разбор: причин ровно три, и они проверяются по порядку.
+            self._robot = None
+            raise ArmError(
+                f"робот {self.ip}:{dash} не отвечает.\n"
+                f"  1. Питание контроллера включено? Кабель в LAN1?\n"
+                f"  2. Профиль сети поднят: nmcli con up robohand-arm\n"
+                f"     (ip -brief addr — на ethernet должен быть 192.168.5.100/24)\n"
+                f"  3. Порт занят другим скриптом? Контроллер пускает одного\n"
+                f"     клиента: закрой его по-хорошему, не kill -9\n"
+                f"  исходно: {e}") from None
         _check(self._rc.RequestControl(), "RequestControl")
         self._robot.StartFeedbackMonitor()
 
@@ -168,6 +208,35 @@ class ArmClient:
     def is_moving(self):
         return self._status().running_status != 0
 
+    def error_report(self, language="ru"):
+        """Расшифровка аварии словами, от самого контроллера.
+
+        Контроллер держит HTTP-интерфейс со справочником аварий на десяти
+        языках. Это авторитетнее локальных json-таблиц из demo/files: там,
+        например, вовсе нет кода 2, который робот реально выдаёт. Собственный
+        разборщик SDK (parse_error_ids) сломан — в исходнике комментарий и
+        присваивание слиплись в одну строку.
+        """
+        try:
+            from dobot_sdk.api.error_controller import ErrorController
+            ec = ErrorController(self.ip)
+            ec.SetLanguage(language)
+            report = ec.GetError(language)
+        except Exception as e:
+            return f"(HTTP-справочник недоступен: {type(e).__name__})"
+        msgs = report.get("errMsg") or []
+        if not msgs:
+            return ""
+        out = []
+        for m in msgs:
+            if isinstance(m, dict):
+                text = m.get("description") or m.get("errMsg") or str(m)
+                fix = m.get("solution") or ""
+                out.append(f"{text}" + (f"\n     -> {fix}" if fix else ""))
+            else:
+                out.append(str(m))
+        return "\n".join(out)
+
     # --- питание и движение ---------------------------------------------
     def enable(self, load_kg=None, timeout=10.0):
         """Подать питание на суставы. ПОСЛЕ ЭТОГО РУКА МОЖЕТ ПОЕХАТЬ."""
@@ -239,6 +308,22 @@ class ArmClient:
 
     def stop(self):
         return self._rc.Stop()
+
+    def reachable(self, pose):
+        """Достанет ли рука до этой позы. Обратная кинематика, БЕЗ движения.
+
+        Дешёвая мгновенная команда (~3 мс). Вызывать перед каждым движением:
+        иначе недостижимая цель приходит не отказом, а аварией на полпути.
+        """
+        return _err_id(self._rc.InverseKin(list(pose))) == 0
+
+    def solve_joints(self, pose, near=None):
+        """Углы суставов для позы, или None если недостижима."""
+        resp = self._rc.InverseKin(
+            list(pose), use_joint_near=1 if near else 0, joint_near=near)
+        if _err_id(resp) != 0:
+            return None
+        return [float(x) for x in _payload(resp).split(",")]
 
     # --- ручное ведение --------------------------------------------------
     def drag(self, on, sensitivity=None):

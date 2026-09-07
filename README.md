@@ -16,7 +16,12 @@ suction/           пакет проекта (слой 1 плана §5.1 — ч
   calib/           hand-eye (cv2.calibrateHandEye), интринсики
   dataset/         синхронный логгер трёх потоков, автосбор по сетке поз
   analysis/        признаки кривой давления, классификатор RQ1, метрики
-tools/             запускаемые скрипты
+tools/             запускаемые скрипты, разложены по функциям
+  _lib/            общее: окружение, предполётная подготовка
+  camera/          драйвер HP60C, сброс USB, проверки кадра
+  arm/             связь с E6, аварии, присоска, движение
+  calib/           ChArUco-доска и калибровка камера-рука
+  measure/         оценка нормали и её ошибка (RQ2)
 firmware/          скетч Arduino: I2C-датчик + управление насосом/клапаном
 vendor/            внешние SDK (не в git)
 data/              raw / calib / processed (не в git)
@@ -28,16 +33,16 @@ hardware/cad/      переходник под фланец E6
 
 ```bash
 # камера (отдельный терминал, закрывать по Ctrl+C, не kill -9)
-tools/start_camera.sh
+tools/camera/start.sh
 
 # просмотр RGB-D
-tools/run_rgbd.sh
+tools/camera/rgbd.sh
 
 # ГЕЙТ ПРОЕКТА: годится ли глубина для оценки нормалей (план §12.1)
-tools/run_depth_check.sh
+tools/camera/depth_check.sh
 
 # печатная ChArUco-доска для hand-eye (робот не нужен)
-.venv/bin/python tools/make_charuco_board.py
+python3 tools/calib/make_board.py
 ```
 
 ## Порядок работ
