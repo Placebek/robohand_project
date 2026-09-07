@@ -145,21 +145,64 @@ def rotation_diversity(rotations):
     return max(angles), sv[:3]
 
 
+def tilt_report(rotations, min_tilt=15.0):
+    """Куда и насколько кренили доску, в терминах кадра.
+
+    Нормаль доски в системе камеры — третий столбец R. Угол между ней и
+    оптической осью есть наклон; проекция на плоскость кадра говорит, в
+    какую сторону доска завалена. Разворот доски в собственной плоскости
+    (вращение вокруг взгляда камеры) наклона не даёт вообще — именно им
+    легко набрать красивый «макс. поворот» при вырожденном наборе.
+    """
+    sectors = {"вправо": 0, "вниз": 0, "влево": 0, "вверх": 0}
+    tilts = []
+    for R in rotations:
+        n = R[:, 2]
+        if n[2] < 0:
+            n = -n
+        tilt = np.degrees(np.arccos(np.clip(n[2], -1.0, 1.0)))
+        tilts.append(tilt)
+        if tilt < min_tilt:
+            continue
+        ang = (np.degrees(np.arctan2(n[1], n[0])) + 360.0) % 360.0
+        idx = int(((ang + 45.0) % 360.0) // 90.0)
+        sectors[list(sectors)[idx]] += 1
+    return (float(np.median(tilts)) if tilts else 0.0), sectors
+
+
 def diversity_verdict(rotations):
     """Строка для человека: хватает ли разброса ориентаций."""
     max_angle, sv = rotation_diversity(rotations)
     if sv[0] < 1e-9:
         return "ориентация не менялась вообще — решение выродится", False
     ratio = sv[2] / sv[0]
+    med_tilt, sectors = tilt_report(rotations)
+    empty = [k for k, v in sectors.items() if v == 0]
     text = (f"разброс ориентаций: макс. поворот {max_angle:.0f}°, "
             f"оси {sv[0]:.2f}/{sv[1]:.2f}/{sv[2]:.2f}, "
-            f"третья/первая = {ratio:.3f}")
+            f"третья/первая = {ratio:.3f}\n"
+            f"   наклон доски: медиана {med_tilt:.0f}°, кренов >15°: "
+            + ", ".join(f"{k} {v}" for k, v in sectors.items()))
+    # куда кренить дальше: пустой сектор, а если пустых нет — самый редкий
+    where = ", ".join(empty) if empty else min(sectors, key=sectors.get)
     if max_angle < 20:
         return text + "\n   МАЛО: повороты меньше 20°, кренить сильнее", False
     if ratio < 0.15:
         return (text + "\n   ПЛОСКО: оси вращения почти в одной плоскости. "
-                "Кренить в ДРУГУЮ сторону", False)
-    return text + "\n   разброс достаточный", True
+                f"Завали доску на 25-40° {where} — разворот плашмя не в счёт"), False
+    hint = f" (можно добить крен {where})" if empty else ""
+    return text + "\n   разброс достаточный" + hint, True
+
+
+def diversity_badge(rotations):
+    """Сводка набора для окна. Латиницей: putText кириллицу не рисует."""
+    if len(rotations) < 3:
+        return ""
+    _, sv = rotation_diversity(rotations)
+    ratio = sv[2] / sv[0] if sv[0] > 1e-9 else 0.0
+    _, sectors = tilt_report(rotations)
+    counts = " ".join(f"{k}{v}" for k, v in zip("RDLU", sectors.values()))
+    return f"kreny {counts}  ratio {ratio:.2f}"
 
 
 def detect(frame, board, dictionary):
@@ -175,10 +218,26 @@ def detect(frame, board, dictionary):
     return corners, ids
 
 
+def tilt_of(R):
+    """Крен доски к плоскости кадра и сторона завала, в терминах кадра.
+
+    Разворот доски в собственной плоскости крена НЕ даёт: нормаль остаётся
+    вдоль взгляда камеры. Отличить одно от другого на глаз почти нельзя,
+    поэтому число выводится в окно.
+    """
+    n = R[:, 2]
+    if n[2] < 0:
+        n = -n
+    tilt = float(np.degrees(np.arccos(np.clip(n[2], -1.0, 1.0))))
+    ang = (np.degrees(np.arctan2(n[1], n[0])) + 360.0) % 360.0
+    side = ["vpravo", "vniz", "vlevo", "vverh"][int(((ang + 45.0) % 360.0) // 90.0)]
+    return tilt, side
+
+
 WINDOW = "hand-eye: ПРОБЕЛ снять, s пропустить, q закончить"
 
 
-def draw_overlay(frame, corners, ids, shot, total, verdict):
+def draw_overlay(frame, corners, ids, shot, total, verdict, tilt=None):
     """Кадр с разметкой: найденные углы и подсказки."""
     view = frame.copy()
     n = 0 if ids is None else len(ids)
@@ -186,11 +245,24 @@ def draw_overlay(frame, corners, ids, shot, total, verdict):
         cv2.aruco.drawDetectedCornersCharuco(view, corners, ids, (0, 255, 0))
 
     if n >= GOOD_CORNERS:
-        color, state = (0, 220, 0), "готов снимать"
+        color, state = (0, 220, 0), "gotov snimat"
     elif n >= MIN_CORNERS:
-        color, state = (0, 200, 220), "мало углов, но сойдёт"
+        color, state = (0, 200, 220), "malo uglov, no soidet"
     else:
-        color, state = (0, 0, 255), f"НЕ СНЯТЬ: нужно {MIN_CORNERS}+"
+        color, state = (0, 0, 255), f"NE SNYAT: nuzhno {MIN_CORNERS}+"
+
+    if tilt is not None:
+        deg, side = tilt
+        if deg >= 25:
+            tcol, mark = (0, 220, 0), f"kren {deg:.0f} {side}"
+        elif deg >= 15:
+            tcol, mark = (0, 200, 220), f"kren {deg:.0f} {side} - malovato"
+        else:
+            tcol, mark = (0, 0, 255), f"kren {deg:.0f} - PLASHMYA, zavali dosku"
+        cv2.putText(view, mark, (8, 26), cv2.FONT_HERSHEY_SIMPLEX,
+                    0.7, (0, 0, 0), 4, cv2.LINE_AA)
+        cv2.putText(view, mark, (8, 26), cv2.FONT_HERSHEY_SIMPLEX,
+                    0.7, tcol, 2, cv2.LINE_AA)
 
     bar = view.shape[0] - 52
     cv2.rectangle(view, (0, bar), (view.shape[1], view.shape[0]), (0, 0, 0), -1)
@@ -312,8 +384,15 @@ def main():
                     frame = eye.frame.copy()
                     corners, ids = detect(frame, board, dictionary)
                     n = 0 if ids is None else len(ids)
+                    tilt = None
+                    if n >= MIN_CORNERS:
+                        R_live = board_rotation(corners, ids, board,
+                                                eye.K, eye.D)
+                        if R_live is not None:
+                            tilt = tilt_of(R_live)
                     cv2.imshow(WINDOW, draw_overlay(frame, corners, ids,
-                                                    i, args.poses, verdict_line))
+                                                    i, args.poses, verdict_line,
+                                                    tilt))
 
                     key = cv2.waitKey(1) & 0xFF
                     if key in (ord("q"), 27):
@@ -353,7 +432,7 @@ def main():
                           f"фланец z={pose[2]:.0f} мм")
                     if len(rotations) >= 3:
                         text, _ = diversity_verdict(rotations)
-                        verdict_line = text.splitlines()[-1].strip()
+                        verdict_line = diversity_badge(rotations)
                         print(f"   {text}")
                     i += 1
             finally:
