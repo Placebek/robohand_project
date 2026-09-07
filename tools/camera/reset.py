@@ -19,10 +19,12 @@ HP60C приходит в рабочее состояние не всегда. �
 Запуск:
   tools/camera/reset.sh
 """
-import fcntl
+import platform
 import re
+import time
 import subprocess
 import sys
+from pathlib import Path
 
 VID_PID = "3482:6723"          # Nuwa/Angstrong HP60C
 USBDEVFS_RESET = ord("U") << 8 | 20    # _IO('U', 20)
@@ -37,20 +39,43 @@ def find_node():
         return None
     m = re.match(r"Bus (\d+) Device (\d+):", out.strip())
     if not m:
-        print(f"Камера {VID_PID} на шине не найдена. Проверь, воткнута ли она.")
         return None
     return f"/dev/bus/usb/{m.group(1)}/{m.group(2)}"
 
 
+
+
 def driver_running():
-    # -x по имени процесса, а не по всей командной строке: -f ловит любую
-    # команду, где эта строка просто упомянута, включая собственную.
-    pids = subprocess.run(["pgrep", "-x", "ascamera_node"],
-                          capture_output=True, text=True).stdout.split()
-    return pids or None
+    """Живые процессы драйвера. Разбор /proc общий, см. tools/_lib/camera_proc.py."""
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "_lib"))
+    from camera_proc import driver_pids
+    launchers, nodes = driver_pids()
+    return (launchers + nodes) or None
+
+
+def wait_on_bus(timeout=15.0):
+    """Дождаться, пока устройство вернётся на шину после сброса.
+
+    USBDEVFS_RESET переподключает устройство: оно исчезает и появляется заново
+    уже с ДРУГИМ номером в /dev/bus/usb. Кто ищет его сразу после сброса —
+    не находит и решает, что камеру выдернули.
+    """
+    end = time.monotonic() + timeout
+    while time.monotonic() < end:
+        if find_node() is not None:
+            return True
+        time.sleep(0.5)
+    return False
 
 
 def main():
+    if platform.system() != "Linux":
+        print(f"Сброс USB через ioctl есть только в Linux, а тут "
+              f"{platform.system()}.")
+        print("Выдерни кабель камеры и воткни обратно — это ровно то же самое.")
+        return 1
+    import fcntl  # ядро Linux; на других системах модуля просто нет
+
     busy = driver_running()
     if busy:
         print(f"Драйвер камеры ещё работает (pid {', '.join(busy)}).")
@@ -62,10 +87,12 @@ def main():
 
     node = find_node()
     if node is None:
+        print(f"Камера {VID_PID} на шине не найдена. Проверь, воткнута ли она.")
         return 1
 
     print(f"сбрасываю {node} ...")
     try:
+        import fcntl
         with open(node, "wb") as f:
             fcntl.ioctl(f.fileno(), USBDEVFS_RESET, 0)
     except PermissionError:
@@ -75,10 +102,18 @@ def main():
         print(f"ioctl не прошёл: {e}. Выдерни провод.")
         return 1
 
-    print("готово — устройство переинициализировано.")
-    print()
-    print("Дальше: tools/camera/start.sh, затем tools/camera/zone_check.sh.")
-    print("Если дыры остались — значит дело не в шине, копай в драйвере.")
+    if not wait_on_bus():
+        print("после сброса устройство не вернулось на шину за 15 с.")
+        print("Выдерни кабель и воткни обратно.")
+        return 1
+
+    print("готово — устройство переинициализировано и снова на шине.")
+    # Подсказку печатаем только при ручном запуске: из preflight драйвер
+    # поднимается следующей же строкой, и совет запустить его сбивает с толку.
+    if "--quiet" not in sys.argv:
+        print()
+        print("Дальше: tools/camera/start.sh, затем tools/camera/zone_check.sh.")
+        print("Если дыры остались — значит дело не в шине, копай в драйвере.")
     return 0
 
 

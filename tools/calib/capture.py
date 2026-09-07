@@ -222,10 +222,13 @@ def main():
     ap.add_argument("--no-drag", action="store_true",
                     help="не включать ручное ведение: руку ставишь пультом "
                          "или кнопкой на фланце, скрипт только пишет позы")
-    ap.add_argument("--out", default=None, help="куда писать (по умолчанию по дате)")
+    ap.add_argument("--out", default=None, help="куда писать (по умолчанию по дате и времени)")
     args = ap.parse_args()
 
-    out = Path(args.out) if args.out else DATA_CALIB / f"handeye_{date.today():%Y%m%d}"
+    # Имя с временем, а не только с датой: две съёмки в один день иначе
+    # пишутся в одну папку, и вторая затирает первую вместе со всеми кадрами.
+    out = (Path(args.out) if args.out
+           else DATA_CALIB / time.strftime("handeye_%Y%m%d_%H%M"))
     out.mkdir(parents=True, exist_ok=True)
 
     board, dictionary = load_board()

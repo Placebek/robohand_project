@@ -47,6 +47,7 @@ from cv_bridge import CvBridge  # noqa: E402
 from rclpy.node import Node     # noqa: E402
 from sensor_msgs.msg import CameraInfo, Image  # noqa: E402
 
+from suction.arm.client import run_tool  # noqa: E402
 from suction.config import (DATA_CALIB, DEPTH_TOPIC, RGB_TOPIC,  # noqa: E402
                             RGB_INFO_TOPIC)
 from tools.calib.capture import detect, load_board  # noqa: E402
@@ -105,7 +106,32 @@ def main():
         n = 0 if ids is None else len(ids)
         print(f"\nуглов доски найдено: {n}")
         if n < 8:
-            print("Мало. Положи доску на стол лицом вверх в рабочий круг.")
+            # Показываем, что именно видит камера: «углов 0» неотличимо от
+            # «доска лежит мимо поля зрения», а это разные беды.
+            shot = Path("/tmp/robohand-view.png")
+            marked = rgb.copy()
+            cx_, cy_ = 320, 275
+            cv2.circle(marked, (cx_, cy_), 180, (0, 200, 0), 2)
+            cv2.drawMarker(marked, (cx_, cy_), (0, 200, 0), cv2.MARKER_CROSS, 20, 2)
+            cv2.imwrite(str(shot), marked)
+
+            mc, mi, rej = cv2.aruco.detectMarkers(
+                cv2.cvtColor(rgb, cv2.COLOR_BGR2GRAY), dictionary)
+            found = 0 if mi is None else len(mi)
+            print(f"  ArUco-маркеров в кадре: {found}, "
+                  f"отвергнутых кандидатов: {len(rej)}")
+            print(f"  что видит камера: {shot} (зелёным — рабочий круг)")
+
+            if found == 0 and len(rej) < 5:
+                print("\n  Похоже, доски в поле зрения НЕТ. Открой снимок выше")
+                print("  и положи доску внутрь зелёного круга.")
+            else:
+                z = float(np.nanmedian(depth[np.isfinite(depth) & (depth > 0)]))
+                side = 20.84 * K[0, 0] / z
+                print(f"\n  Доска видна, но распознаётся плохо. На дистанции "
+                      f"{z:.0f} мм")
+                print(f"  сторона маркера всего {side:.1f} px при пороге ~20.")
+                print("  Подложи под доску коробку, чтобы поднять её к камере.")
             return 1
 
         ok, rvec, tvec = cv2.aruco.estimatePoseCharucoBoard(

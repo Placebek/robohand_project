@@ -38,6 +38,7 @@ from cv_bridge import CvBridge  # noqa: E402
 from rclpy.node import Node     # noqa: E402
 from sensor_msgs.msg import CameraInfo, Image  # noqa: E402
 
+from suction.arm.client import run_tool  # noqa: E402
 from suction.config import (CUP_DIAMETER_MM, DATA_CALIB, DEPTH_TOPIC,  # noqa: E402
                             RGB_TOPIC, RGB_INFO_TOPIC, TOOL_LENGTH_MM,
                             TOOL_OFFSET_MM, WORK_CENTRE_PX, WORK_RADIUS_PX)

@@ -1,4 +1,5 @@
 import sys
+import time
 from pathlib import Path
 
 import cv2
@@ -43,17 +44,36 @@ def main():
     rclpy.init()
     node = RgbdViewer()
 
+    # Растащить окна явно. Qt ставит оба в одну точку, и окно глубины просто
+    # накрывает цветное — выглядит так, будто RGB не открылся вовсе.
     cv2.namedWindow("RGB")
+    cv2.moveWindow("RGB", 40, 60)
     cv2.namedWindow("Depth - klik dlya zamera")
+    cv2.moveWindow("Depth - klik dlya zamera", 40 + 660, 60)
     mouse_bound = False
     depth_shown_count = 0
 
-    print("Ожидание кадров от ascamera_node "
-          "(запусти в другом терминале: ros2 launch ascamera hp60c.launch.py)...")
+    print("Окна: RGB слева, глубина справа. q — выход.")
+    print("Жду кадров...")
+    waited = time.monotonic()
+    announced = set()
 
     try:
         while rclpy.ok():
             rclpy.spin_once(node, timeout_sec=0.05)
+
+            # Говорим вслух, какой поток пришёл, а какого всё ещё нет: молчащее
+            # окно неотличимо от неоткрывшегося, и мы на этом уже потеряли время.
+            for name, ok in (("RGB", node.rgb is not None),
+                             ("глубина", node.depth_mm is not None)):
+                if ok and name not in announced:
+                    announced.add(name)
+                    print(f"  {name}: есть кадры")
+            if len(announced) < 2 and time.monotonic() - waited > 10:
+                waited = time.monotonic()
+                missing = {"RGB", "глубина"} - announced
+                print(f"  НЕТ КАДРОВ: {', '.join(sorted(missing))}. "
+                      f"Драйвер запущен? tools/camera/zone_check.sh покажет")
 
             if node.rgb is not None:
                 cv2.imshow("RGB", node.rgb)
@@ -115,4 +135,7 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("\nпрервано")

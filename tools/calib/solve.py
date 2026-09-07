@@ -271,7 +271,23 @@ def main():
           f"x={Tcb[0,3]*1000:+.1f} y={Tcb[1,3]*1000:+.1f} z={Tcb[2,3]*1000:+.1f} мм")
 
     out = folder.parent / "handeye.json"
-    out.write_text(json.dumps({
+
+    # Рядом с рабочим файлом кладём копию, привязанную к набору: решение по
+    # другому набору иначе затирает предыдущее молча, и вернуться не к чему.
+    if out.exists():
+        try:
+            prev = json.loads(out.read_text())
+        except (OSError, ValueError):
+            prev = {}
+        if prev.get("набор") and prev["набор"] != folder.name:
+            print(f"\nВНИМАНИЕ: заменяю решение по набору {prev['набор']} "
+                  f"(разброс {prev.get('разброс_фланец_доска_мм', 0):.2f} мм) "
+                  f"решением по {folder.name}.")
+            print("Прежнее остаётся в "
+                  f"{prev['набор']}.json, если камеру не двигали —")
+            print("сверь отпечаток зоны: tools/camera/zone_check.sh")
+
+    payload = json.dumps({
         "набор": folder.name,
         "поз": good,
         "порядок_углов_эйлера": best["порядок"],
@@ -281,8 +297,11 @@ def main():
         "податливость_крепления": comp,
         "T_камера_в_базу": Tcb.tolist(),
         "комментарий": "трансляция в метрах; позы фланца подавались обращёнными",
-    }, ensure_ascii=False, indent=2))
+    }, ensure_ascii=False, indent=2)
+    out.write_text(payload)
+    (folder.parent / f"{folder.name}.json").write_text(payload)
     print(f"\nсохранено: {out}")
+    print(f"копия набора:  {folder.parent / (folder.name + '.json')}")
     return 0
 
 

@@ -1,3 +1,7 @@
+# Полный набор для машины СО СТЕНДОМ (Linux + ROS 2 Jazzy).
+# Для машины без стенда есть requirements-portable.txt — там половина проекта,
+# которой не нужны ни камера, ни ROS.
+#
 # --- ставится в .venv (создан с --system-site-packages) ---
 # numpy/scipy/pandas/matplotlib/opencv/pyserial берутся из системы (ROS 2 Jazzy),
 # здесь только то, чего в системе нет.

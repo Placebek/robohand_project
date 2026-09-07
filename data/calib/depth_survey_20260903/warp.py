@@ -1,5 +1,6 @@
 import sys, time
-sys.path.insert(0,"/home/jake/Downloads/robohand")
+from pathlib import Path
+sys.path.insert(0, str(next(p for p in Path(__file__).resolve().parents if (p / "suction").is_dir())))
 import numpy as np, rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import Image

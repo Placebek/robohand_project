@@ -1,5 +1,25 @@
 #!/bin/bash
 # Гейт по глубине (RQ2).
+#
+# Перед запуском проверяется, что камера в рабочем состоянии: драйвер поднят,
+# мёртвой области нет.
+# Пропустить проверку: --skip-preflight
 set -e
-source "$(dirname "$(readlink -f "$0")")/../_lib/env.sh"
-robohand_run qt tools/camera/depth_check.py "$@"
+HERE="$(dirname "$(readlink -f "$0")")"
+source "$HERE/../_lib/env.sh"
+source "$HERE/../_lib/preflight.sh"
+
+ARGS=(); SKIP=0
+for a in "$@"; do
+    case "$a" in
+        --skip-preflight) SKIP=1 ;;
+        *) ARGS+=("$a") ;;
+    esac
+done
+
+robohand_env qt
+cd "$ROBOHAND_ROOT"
+if [ "$SKIP" -eq 0 ]; then
+    robohand_camera_ready
+fi
+exec env "${ROBOHAND_ENV[@]}" python3 tools/camera/depth_check.py "${ARGS[@]}"
