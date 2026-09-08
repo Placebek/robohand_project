@@ -28,6 +28,7 @@ sys.path.insert(0, str(ROOT))
 import numpy as np  # noqa: E402
 import rclpy        # noqa: E402
 
+from suction.calib.handeye import load_handeye  # noqa: E402
 from suction.config import (DATA_CALIB, WORK_CENTRE_PX,  # noqa: E402
                             WORK_RADIUS_PX)
 from tools.measure.pick_normal import Scene, estimate_normal  # noqa: E402
@@ -58,9 +59,10 @@ def main():
     ap.add_argument("--save", action="store_true", help="записать результат в data/calib")
     args = ap.parse_args()
 
-    cal = DATA_CALIB / "handeye.json"
-    Tcb = np.array(json.loads(cal.read_text())["T_камера_в_базу"]) if cal.exists() else None
-    if Tcb is None:
+    try:
+        _, Tcb = load_handeye()
+    except FileNotFoundError:
+        Tcb = None
         print("нет handeye.json — наклон будет считаться в системе камеры")
 
     cx, cy = WORK_CENTRE_PX

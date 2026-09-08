@@ -18,6 +18,10 @@
 включается флагом --approach и требует отдельного подтверждения на каждую
 точку.
 
+Захват целиком (--pick): подвод по нормали, вакуум, посадка с
+продавливанием чашки, подъём. Держит или нет — видно только глазами:
+обратной связи по разрежению пока нет, она и есть предмет работы.
+
 Запуск:
   tools/measure/pick_normal.sh              # только считать
   tools/measure/pick_normal.sh --approach   # ещё и подводить руку
@@ -38,6 +42,7 @@ from cv_bridge import CvBridge  # noqa: E402
 from rclpy.node import Node     # noqa: E402
 from sensor_msgs.msg import CameraInfo, Image  # noqa: E402
 
+from suction.calib.handeye import load_handeye  # noqa: E402
 from suction.arm.client import run_tool  # noqa: E402
 from suction.config import (CUP_DIAMETER_MM, DATA_CALIB, DEPTH_TOPIC,  # noqa: E402
                             RGB_TOPIC, RGB_INFO_TOPIC, TOOL_LENGTH_MM,
@@ -159,24 +164,45 @@ def main():
                     help="ниже этой высоты фланец не опускать, мм")
     ap.add_argument("--z-ceiling", type=float, default=350.0,
                     help="выше этой высоты не поднимать — там камера, мм")
+    ap.add_argument("--pick", action="store_true",
+                    help="полный цикл: подвод, вакуум, посадка, подъём. "
+                         "Включает --approach")
+    ap.add_argument("--press", type=float, default=5.0,
+                    help="на сколько мм продавить чашку НИЖЕ поверхности при "
+                         "посадке. Резина уплотняется сжатием, без этого "
+                         "чашка касается кромкой и не держит")
+    ap.add_argument("--settle", type=float, default=2.0,
+                    help="сколько секунд ждать уплотнения после включения "
+                         "вакуума. ES01 даёт 2.0 л/мин, фронт медленный")
+    ap.add_argument("--lift", type=float, default=80.0,
+                    help="на сколько мм поднять после захвата")
     ap.add_argument("--transit-z", type=float, default=260.0,
                     help="высота транзита: сначала выходим сюда над точкой, "
                          "потом спускаемся по прямой. Так путь предсказуем")
     args = ap.parse_args()
+    if args.pick:
+        args.approach = True
 
-    cal_path = DATA_CALIB / "handeye.json"
-    if not cal_path.exists():
-        print(f"нет {cal_path} — сначала tools/calib/solve.sh")
+    try:
+        cal, Tcb = load_handeye()
+    except FileNotFoundError as e:
+        print(e)
         return 1
-    Tcb = np.array(json.loads(cal_path.read_text())["T_камера_в_базу"])
+    print(f"калибровка: набор {cal['набор']}, разброс "
+          f"{cal['разброс_фланец_доска_мм']:.2f} мм")
 
     arm = None
     if args.approach:
         from suction.arm.client import ArmClient, run_tool
         print("=" * 66)
-        print("РЕЖИМ ПОДВОДА: рука будет запитана и поедет к указанной точке.")
-        print(f"Зависание {args.standoff:g} мм над поверхностью, скорость "
-              f"{args.speed}%.")
+        if args.pick:
+            print("РЕЖИМ ЗАХВАТА: рука поедет к точке, ВКЛЮЧИТ ВАКУУМ,")
+            print(f"сядет на поверхность с продавливанием {args.press:g} мм")
+            print(f"и поднимется на {args.lift:g} мм. Скорость {args.speed}%.")
+        else:
+            print("РЕЖИМ ПОДВОДА: рука будет запитана и поедет к указанной точке.")
+            print(f"Зависание {args.standoff:g} мм над поверхностью, скорость "
+                  f"{args.speed}%.")
         print(f"Длина инструмента взята {TOOL_LENGTH_MM:g} мм — если она врёт,")
         print("врёт и высота подвода. Аварийный стоп под рукой.")
         print("=" * 66)
@@ -333,6 +359,60 @@ def main():
             miss = np.hypot(after[0] - flange[0], after[1] - flange[1])
             print(f"  промах по горизонтали: {miss:.1f} мм, "
                   f"по высоте {after[2]-flange[2]:+.1f} мм")
+
+            if not args.pick:
+                print(f"  ЗАЗОР от поверхности до губы чашки должен быть "
+                      f"{args.standoff:g} мм.")
+                print(f"  Померь линейкой. Если больше — TOOL_LENGTH_MM "
+                      f"завышена, если меньше — занижена:")
+                print(f"  новая = {TOOL_LENGTH_MM:g} - (зазор - {args.standoff:g})")
+                continue
+
+            # Посадка. Чашка идёт НИЖЕ поверхности на press: резина
+            # уплотняется сжатием, а не касанием кромкой. Промах калибровки
+            # по высоте (единицы мм) съедается той же податливостью.
+            seat_tip = p_base * 1000.0 - n_base * args.press
+            seat = seat_tip + n_base * TOOL_LENGTH_MM
+            if ox or oy:
+                seat = seat - R_tgt @ np.array([ox, oy, 0.0])
+            if seat[2] < args.z_floor:
+                print(f"  посадка отменена: фланец ушёл бы на z={seat[2]:.0f} мм, "
+                      f"ниже порога {args.z_floor:.0f}")
+                continue
+            if not arm.reachable([seat[0], seat[1], seat[2], rx, ry, rz]):
+                print("  до точки посадки рука не достаёт")
+                continue
+
+            try:
+                print("  вакуум ВКЛ")
+                arm.gripper(True)
+                print(f"  посадка: спуск на {args.standoff + args.press:.0f} мм "
+                      f"по нормали...")
+                arm.move_pose([seat[0], seat[1], seat[2], rx, ry, rz],
+                              linear=True)
+                print(f"  жду уплотнения {args.settle:g} с...")
+                time.sleep(args.settle)
+
+                up = seat + n_base * args.lift
+                if up[2] > args.z_ceiling:
+                    up = seat + n_base * max(0.0, args.z_ceiling - seat[2])
+                print(f"  подъём на {np.linalg.norm(up - seat):.0f} мм...")
+                arm.move_pose([up[0], up[1], up[2], rx, ry, rz], linear=True)
+            except Exception as e:
+                print(f"  движение не прошло: {e}")
+                codes = arm.errors()
+                print(f"  коды: {', '.join(codes) if codes else 'нет'}")
+                print("  сбросить: tools/arm/clear_fault.sh")
+                print("  вакуум оставляю включённым — придержи предмет")
+                continue
+
+            print(f"  подняли. Выход ES01: "
+                  f"{'включён' if arm.gripper_state() else 'ВЫКЛЮЧЕН'}")
+            print("  Держит или нет — глазами: обратной связи по разрежению")
+            print("  ещё нет, это и есть предмет работы.")
+            if input("  отпустить? y/n: ").strip().lower() in ("y", "д", "да"):
+                arm.gripper(False)
+                print("  вакуум ВЫКЛ")
     finally:
         cv2.destroyAllWindows()
         for _ in range(4):
@@ -340,6 +420,14 @@ def main():
         scene.destroy_node()
         rclpy.shutdown()
         if arm is not None:
+            # Вакуум НЕ выключаем сами: если в чашке предмет, он упадёт.
+            # Но и молчать нельзя — насос останется работать после выхода.
+            try:
+                if arm.gripper_state():
+                    print("\nВАКУУМ ОСТАЛСЯ ВКЛЮЧЁН. Выключить: "
+                          "tools/arm/gripper.sh off")
+            except Exception:
+                pass
             arm.close()
     return 0
 

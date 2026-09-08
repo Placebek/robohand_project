@@ -27,14 +27,20 @@
    ОДНУ И ТУ ЖЕ высоту z. Разброс z по углам — ошибка калибровки, выраженная
    в миллиметрах на реальной сцене, а не в абстрактной невязке.
 
-Доску для проверки положить НА СТОЛ, лицом вверх, в рабочий круг.
+Доску для проверки положить НА СТОЛ, лицом вверх, в рабочий круг — но
+ТОЛЬКО ПОСЛЕ того, как скрипт об этом попросит. До этого обёртка сверяет
+положение камеры с эталоном, а эталон снят по пустому столу: доска гасит ИК,
+глубина под ней проваливается, и сверка ложно решает, что камеру сдвинули.
 
 Запуск:
   tools/calib/check.sh
+  tools/calib/check.sh --yes   # не ждать, доска уже лежит
 """
+import argparse
 import json
 import sys
 import time
+import warnings
 from pathlib import Path
 
 ROOT = next(p for p in Path(__file__).resolve().parents if (p / "suction").is_dir())
@@ -48,9 +54,10 @@ from rclpy.node import Node     # noqa: E402
 from sensor_msgs.msg import CameraInfo, Image  # noqa: E402
 
 from suction.arm.client import run_tool  # noqa: E402
+from suction.calib.handeye import load_handeye  # noqa: E402
 from suction.config import (DATA_CALIB, DEPTH_TOPIC, RGB_TOPIC,  # noqa: E402
                             RGB_INFO_TOPIC)
-from tools.calib.capture import detect, load_board  # noqa: E402
+from tools.calib.capture import ask, detect, load_board  # noqa: E402
 from tools.calib.solve import euler_to_R  # noqa: E402
 
 
@@ -82,21 +89,47 @@ class Both(Node):
             raise RuntimeError("нет кадров или интринсик — запущен ли драйвер?")
         st = np.stack([d.astype(np.float32) for d in self.depth])
         st[st == 0] = np.nan
-        return self.rgb.copy(), np.nanmedian(st, axis=0)
+        # Пиксель, нулевой во ВСЕХ кадрах, — обычная дырка глубины (чёрное
+        # ИК не отражает). nanmedian на нём законно отдаёт NaN, ругаться не
+        # на что; дальше такие точки отсеиваются по isfinite.
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", "All-NaN slice encountered")
+            med = np.nanmedian(st, axis=0)
+        return self.rgb.copy(), med
 
 
 def main():
-    path = DATA_CALIB / "handeye.json"
-    if not path.exists():
-        print(f"нет {path} — сначала tools/calib/solve.sh")
+    ap = argparse.ArgumentParser(
+        description="Проверка калибровки от пикселя до координат руки.")
+    ap.add_argument("--yes", "-y", action="store_true",
+                    help="не спрашивать про доску: она уже на столе")
+    ap.add_argument("--all", action="store_true",
+                    help="прогнать по этому же кадру ВСЕ решения из "
+                         "data/calib/handeye_*.json и сравнить их")
+    args = ap.parse_args()
+
+    try:
+        cal, Tcb = load_handeye()
+    except FileNotFoundError as e:
+        print(e)
         return 1
-    cal = json.loads(path.read_text())
-    Tcb = np.array(cal["T_камера_в_базу"])
     print(f"калибровка: набор {cal['набор']}, метод {cal['метод']}, "
           f"разброс {cal['разброс_фланец_доска_мм']:.2f} мм / "
           f"{cal['разброс_фланец_доска_град']:.2f}°")
 
     board, dictionary = load_board()   # load_board отдаёт пару
+
+    # Пауза здесь не для удобства, а по необходимости: сверка положения камеры
+    # в обёртке идёт по пустому столу, доска на нём гасит ИК и ломает слепок.
+    # Поэтому она кладётся между проверкой и съёмкой кадра.
+    if not args.yes:
+        print("\nТеперь положи доску НА СТОЛ, лицом вверх, в рабочий круг.")
+        print("Раньше было нельзя: на сверке положения камеры она гасит ИК")
+        print("и сверка ложно решает, что камеру сдвинули.")
+        if ask("положил? Enter — снимаю кадр, n — отмена: ").startswith(("n", "н")):
+            print("отменено")
+            return 1
+
     rclpy.init()
     node = Both()
     try:
@@ -167,12 +200,31 @@ def main():
                   "отражают. Это ожидаемо, но для проверки нужно 6+.")
         else:
             d = np.linalg.norm(p_rgb - p_depth, axis=1) * 1000.0
+            # Общая величина расхождения ни о чём не говорит: ошибка вдоль
+            # луча — это масштаб дальномера, поперёк луча — рассовмещение
+            # потоков. Лечатся они разным, поэтому разделяем.
+            ray = p_rgb / np.linalg.norm(p_rgb, axis=1, keepdims=True)
+            diff = p_depth - p_rgb
+            along = np.sum(diff * ray, axis=1) * 1000.0
+            across = np.linalg.norm(diff - ray * (along[:, None] / 1000.0),
+                                    axis=1) * 1000.0
+            scale = np.median(np.linalg.norm(p_depth, axis=1)
+                              / np.linalg.norm(p_rgb, axis=1))
             print(f"\n1. Совмещение RGB и глубины (расхождение двух оценок):")
             print(f"   median {np.median(d):.1f} мм, p95 {np.percentile(d,95):.1f}, "
                   f"max {d.max():.1f}")
-            print("   " + ("потоки совмещены" if np.median(d) < 8 else
-                           "ПОТОКИ НЕ СОВМЕЩЕНЫ — глубину нельзя брать "
-                           "по пикселю из RGB"))
+            print(f"   вдоль луча:  {np.median(along):+6.1f} мм  "
+                  f"(масштаб дальномера {scale:.4f}, то есть "
+                  f"{(scale-1)*100:+.1f} %)")
+            print(f"   поперёк луча: {np.median(across):6.1f} мм  "
+                  f"(рассовмещение потоков)")
+            if np.median(across) < 3.0:
+                print("   -> потоки совмещены; всё расхождение — масштаб глубины.")
+                print("      На плоской сцене это сдвигает её целиком и почти")
+                print("      не портит нормали, ради которых глубина и нужна.")
+            else:
+                print("   -> ПОТОКИ НЕ СОВМЕЩЕНЫ: глубину нельзя брать "
+                      "по пикселю из RGB")
 
         # --- 2. плоскость по измеренной глубине -----------------------
         if len(used) >= 6:
@@ -250,6 +302,33 @@ def main():
         print(f"\n   центр доски в базе: x={centre[0]:+.1f} y={centre[1]:+.1f} "
               f"z={centre[2]:+.1f} мм")
         print("   Сверь глазами: рука должна дотягиваться до этой точки.")
+
+        if args.all:
+            # Невязка AX=XB меряет согласованность решения с самим собой и
+            # молчит о том, попадает ли оно в реальность. Здесь все решения
+            # судятся одним и тем же кадром: доска лежит на столе, значит
+            # верное решение даст ей ровный z и малый наклон.
+            print("\n5. Все решения на этом же кадре "
+                  "(доска на столе: z ровный, наклон около нуля):")
+            print(f"   {'набор':24s} {'невязка':>9s} {'z центра':>9s} "
+                  f"{'разброс z':>10s} {'наклон':>7s}")
+            for f in sorted(DATA_CALIB.glob("handeye_*.json")):
+                try:
+                    c = json.loads(f.read_text())
+                    T = np.array(c["T_камера_в_базу"])
+                except Exception as e:
+                    print(f"   {f.name:24s} не читается: {e}")
+                    continue
+                b = (T[:3, :3] @ p_rgb.T).T + T[:3, 3]
+                zz = b[:, 2] * 1000.0
+                _, _, vt2 = np.linalg.svd(b - b.mean(axis=0))
+                nb = vt2[2]
+                tl = np.degrees(np.arccos(min(1.0, abs(nb[2]))))
+                print(f"   {c.get('набор', f.stem):24s} "
+                      f"{c['разброс_фланец_доска_мм']:6.2f} мм "
+                      f"{zz.mean():+8.1f} {zz.max()-zz.min():9.1f} "
+                      f"{tl:6.1f}°")
+            print("   Выбирать по последним трём столбцам, не по невязке.")
     finally:
         node.destroy_node()
         rclpy.shutdown()
