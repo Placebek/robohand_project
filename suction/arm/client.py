@@ -114,6 +114,10 @@ class ArmClient:
         self.load_kg = load_kg
         self._robot = None
         self._enabled = False
+        # Вызывается в цикле ожидания движения. Нужен тем, у кого есть окно
+        # OpenCV: wait_idle крутится секундами, и пока GUI не прокачивают,
+        # X11 считает окно повисшим и предлагает "force quit or wait".
+        self.on_wait = None
 
     # --- соединение -----------------------------------------------------
     def connect(self, feedback_timeout=5.0):
@@ -276,6 +280,8 @@ class ArmClient:
                 moved = True
             elif moved or time.monotonic() - start > settle:
                 return time.monotonic() - start
+            if self.on_wait is not None:
+                self.on_wait()
             time.sleep(0.02)
         raise ArmError(f"движение не завершилось за {timeout:g} с")
 

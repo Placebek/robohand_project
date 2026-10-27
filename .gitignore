@@ -1,8 +1,11 @@
 .venv/
+.venv-lerobot/
 __pycache__/
 *.pyc
 data/raw/**
 data/processed/**
+data/vla_datasets/**
+data/vla_raw/**
 !data/**/.gitkeep
 *.png
 *.npy

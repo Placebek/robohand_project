@@ -29,4 +29,4 @@ if [ "$SKIP" -eq 0 ]; then
     echo "Стол пока должен быть ПУСТОЙ — доску положишь, когда попрошу."
     robohand_camera_ready --verify-zone
 fi
-exec env "${ROBOHAND_ENV[@]}" python3 tools/calib/check.py "${ARGS[@]}"
+exec env "${ROBOHAND_ENV[@]}" "$ROBOHAND_PY" tools/calib/check.py "${ARGS[@]}"

@@ -13,7 +13,7 @@
 CAMERA_LOG="/tmp/robohand-camera.log"
 CAMERA_VID_PID="3482:6723"
 
-_py() { env "${ROBOHAND_ENV[@]}" python3 "$@"; }
+_py() { env "${ROBOHAND_ENV[@]}" "$ROBOHAND_PY" "$@"; }
 
 _camera_on_bus() { lsusb -d "$CAMERA_VID_PID" >/dev/null 2>&1; }
 
@@ -101,7 +101,7 @@ robohand_preflight() {
         echo
         echo "== рука =="
         env -u LD_LIBRARY_PATH -u PYTHONPATH "${_SNAP_VARS[@]}" \
-            python3 "$ROBOHAND_ROOT/tools/arm/clear_fault.py" || return 1
+            "$ROBOHAND_PY" "$ROBOHAND_ROOT/tools/arm/clear_fault.py" || return 1
     fi
     echo
 }

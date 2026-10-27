@@ -54,6 +54,7 @@ from suction.config import (CUP_DIAMETER_MM, DATA_CALIB, DEPTH_TOPIC,  # noqa: E
 WINDOW = "pick normal - klik v tochku, q vyhod"
 MIN_PATCH_PX = 20           # меньше точек — плоскость не подогнать
 MAX_RESIDUAL_MM = 3.0       # выше — это не плоскость, а край или дыра
+MIN_LIFT_MM = 30.0          # ниже этого подъём бессмысленен: предмет не оторван
 
 
 class Scene(Node):
@@ -174,7 +175,7 @@ def main():
     ap.add_argument("--settle", type=float, default=2.0,
                     help="сколько секунд ждать уплотнения после включения "
                          "вакуума. ES01 даёт 2.0 л/мин, фронт медленный")
-    ap.add_argument("--lift", type=float, default=80.0,
+    ap.add_argument("--lift", type=float, default=200.0,
                     help="на сколько мм поднять после захвата")
     ap.add_argument("--transit-z", type=float, default=260.0,
                     help="высота транзита: сначала выходим сюда над точкой, "
@@ -223,6 +224,17 @@ def main():
     try:
         scene.wait_ready()
         cv2.namedWindow(WINDOW)
+
+        if arm is not None:
+            # Движение блокирует поток на секунды. Без прокачки окна X11
+            # объявляет его повисшим — то самое "force quit or wait".
+            def _pump_gui():
+                scene.pump()
+                if scene.rgb is not None:
+                    cv2.imshow(WINDOW, scene.rgb)
+                cv2.waitKey(1)
+            arm.on_wait = _pump_gui
+
         # Qt-бэкенд создаёт окно не по namedWindow и даже не сразу после
         # первого imshow — момент непредсказуем при совместной работе с rclpy.
         # Поэтому привязку мыши повторяем в цикле, пока не пройдёт.
@@ -383,6 +395,35 @@ def main():
                 print("  до точки посадки рука не достаёт")
                 continue
 
+            # Подъём планируется ДО включения вакуума. Узнать, что рука не
+            # достаёт до верхней точки, уже сидя на предмете — худший момент
+            # из возможных: вакуум включён, предмет взят, а деваться некуда.
+            lift_max, reason = args.lift, None
+            if n_base[2] > 1e-6:
+                # Потолок считается ВДОЛЬ НОРМАЛИ: проход d поднимает всего
+                # d*n_base[2], и наивное d = (потолок - z) недобирает высоту
+                # тем сильнее, чем сильнее наклон.
+                by_ceiling = max(0.0, (args.z_ceiling - seat[2]) / n_base[2])
+                if by_ceiling < lift_max:
+                    lift_max = by_ceiling
+                    reason = f"потолок {args.z_ceiling:.0f} мм, там камера"
+            up, dist = None, lift_max
+            while dist >= MIN_LIFT_MM:
+                cand = seat + n_base * dist
+                if arm.reachable([cand[0], cand[1], cand[2], rx, ry, rz]):
+                    up = cand
+                    break
+                dist -= 10.0
+                reason = "досягаемость руки"
+            if up is None:
+                print(f"  захват отменён: даже на {MIN_LIFT_MM:.0f} мм выше "
+                      f"посадки рука не достаёт.")
+                print("  брать предмет, который нельзя поднять, смысла нет")
+                continue
+            if dist < args.lift - 1.0:
+                print(f"  подъём урезан с {args.lift:.0f} до {dist:.0f} мм "
+                      f"({reason})")
+
             try:
                 print("  вакуум ВКЛ")
                 arm.gripper(True)
@@ -393,11 +434,12 @@ def main():
                 print(f"  жду уплотнения {args.settle:g} с...")
                 time.sleep(args.settle)
 
-                up = seat + n_base * args.lift
-                if up[2] > args.z_ceiling:
-                    up = seat + n_base * max(0.0, args.z_ceiling - seat[2])
                 print(f"  подъём на {np.linalg.norm(up - seat):.0f} мм...")
-                arm.move_pose([up[0], up[1], up[2], rx, ry, rz], linear=True)
+                # По суставам, не по прямой: у отрыва от поверхности нет
+                # причины идти строго линейно, а прямая линия здесь может
+                # потребовать пройти через переворот кисти (rx около 180°)
+                # и получить отказ команды. MovJ сам найдёт путь по суставам.
+                arm.move_pose([up[0], up[1], up[2], rx, ry, rz], linear=False)
             except Exception as e:
                 print(f"  движение не прошло: {e}")
                 codes = arm.errors()

@@ -24,4 +24,4 @@ cd "$ROBOHAND_ROOT"
 if [ "$SKIP" -eq 0 ]; then
     robohand_camera_ready --verify-zone
 fi
-exec env "${ROBOHAND_ENV[@]}" python3 tools/measure/normal_error.py "${ARGS[@]}"
+exec env "${ROBOHAND_ENV[@]}" "$ROBOHAND_PY" tools/measure/normal_error.py "${ARGS[@]}"

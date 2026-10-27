@@ -43,6 +43,7 @@ TOOLS = {
         "find-es01":    ("tools/arm/find_es01.py",    False, "поиск линии захвата"),
         "first-motion": ("tools/arm/first_motion.py", False, "ДВИЖЕНИЕ: J6, повторяемость"),
         "park":         ("tools/arm/park.py",         False, "ДВИЖЕНИЕ: парковка"),
+        "teach-repeat": ("tools/arm/teach_repeat.py", False, "ручное обучение, запись и повтор поз"),
     },
     "calib": {
         "make-board":   ("tools/calib/make_board.py",   False, "печатная ChArUco-доска"),

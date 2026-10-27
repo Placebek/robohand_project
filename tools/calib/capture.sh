@@ -30,4 +30,4 @@ else
     echo "--skip-preflight: камеру и руку не готовлю"
 fi
 
-exec env "${ROBOHAND_ENV[@]}" python3 tools/calib/capture.py "${ARGS[@]}"
+exec env "${ROBOHAND_ENV[@]}" "$ROBOHAND_PY" tools/calib/capture.py "${ARGS[@]}"
